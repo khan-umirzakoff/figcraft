@@ -1159,6 +1159,9 @@ fn nested_instances_resized_again_drop_the_layout_derived_for_their_old_size() {
 #[path = "tail_tests.rs"]
 mod tail;
 
+#[path = "implicit_fill_tests.rs"]
+mod implicit_fill;
+
 #[path = "image_filter_tests.rs"]
 mod image_filters;
 

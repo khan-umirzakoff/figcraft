@@ -397,7 +397,7 @@ struct Mapper<'a> {
     /// networks took gigabytes.
     networks: Vec<Option<VectorNetwork>>,
     /// Index in `networks` by what a network is made from: its blob, its scale and its style table.
-    network_ids: HashMap<(usize, u64, u64, usize), usize>,
+    network_ids: HashMap<(usize, u64, u64, usize, bool), usize>,
 }
 
 impl<'a> Mapper<'a> {
@@ -1741,12 +1741,22 @@ impl<'a> Mapper<'a> {
         if has_missing {
             self.warn("some vector segments refer to style settings missing from the file; they use the layer's stroke");
         }
-        // An open path shows its fill, which regions can't hold: the outline keeps the look.
+        // Keep the cached outline fallback for carriers whose fill cannot be reconstructed.
         let fills_shown =
             o.get("fills").and_then(Value::as_array).is_some_and(|f| f.iter().any(|p| p.get("visible").and_then(Value::as_bool) != Some(false)));
         if net.segments.is_empty() || (net.regions.is_empty() && fills_shown && o.contains_key("fillGeometry")) {
             return false;
         }
+        let implicit = if net.regions.is_empty() && fills_shown {
+            // shortcut: only one closed chain is evidenced without regions; other topologies need native controls.
+            let path = net.single_closed_loop();
+            if path.is_none() {
+                self.warn("regionless vector fill without a cached outline could not be reconstructed; editable segments were kept");
+            }
+            path
+        } else {
+            None
+        };
         let style = |id: u32| styles.get(&u64::from(id)).copied().filter(|_| id != 0);
         let scale = |k: &str| {
             let size = v.size().map(|s| if k == "x" { s.0 } else { s.1 });
@@ -1792,7 +1802,7 @@ impl<'a> Mapper<'a> {
             o.insert("strokeCapEnd".into(), json!(cap_name(last.unwrap_or(node))));
         }
         // Every instance of a main shows the same network: it is written once and shared.
-        let key = (blob_id, sx.to_bits(), sy.to_bits(), std::ptr::from_ref(vd) as usize);
+        let key = (blob_id, sx.to_bits(), sy.to_bits(), std::ptr::from_ref(vd) as usize, implicit.is_some());
         let id = match self.network_ids.get(&key) {
             Some(id) => *id,
             None => {
@@ -1822,8 +1832,11 @@ impl<'a> Mapper<'a> {
                     .iter()
                     .map(|s| json!({"a": s.a, "b": s.b, "ta": [s.ta.0 * sx, s.ta.1 * sy], "tb": [s.tb.0 * sx, s.tb.1 * sy]}))
                     .collect();
-                let regions: Vec<Value> =
+                let mut regions: Vec<Value> =
                     net.regions.iter().map(|r| json!({"loops": r.loops, "winding": if r.non_zero { "nonZero" } else { "evenOdd" }})).collect();
+                if let Some(path) = implicit {
+                    regions.push(json!({"loops": [path], "winding": "nonZero"}));
+                }
                 let mut entry = json!({});
                 entry["vertices"] = Value::Array(vertices);
                 entry["segments"] = Value::Array(segments);
@@ -2422,7 +2435,7 @@ fn stroke(o: &mut Obj, v: &View) {
     if let Some(cap) = v.str("strokeCap") {
         o.insert("strokeCap".into(), json!(cap_name(cap)));
     }
-    // A layer written as the outline of its stroke keeps what it was as plugin data
+    // Outlined strokes and unfilled vectors keep their original shape and paints as plugin data
     // (`outlinedStroke`, our extension of the file JSON).
     let (id, key) = super::export::STASH;
     let kept = v.list("pluginData").iter().find(|p| p.get("pluginID").and_then(Kv::str) == Some(id) && p.get("key").and_then(Kv::str) == Some(key));

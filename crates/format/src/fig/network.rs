@@ -37,6 +37,36 @@ pub(super) struct Network {
     pub regions: Vec<Region>,
 }
 
+impl Network {
+    /// A single closed chain, retaining source segment indices and directions.
+    pub fn single_closed_loop(&self) -> Option<Vec<usize>> {
+        let first = self.segments.first()?;
+        let mut adjacent = vec![[None; 2]; self.vertices.len()];
+        for (i, segment) in self.segments.iter().enumerate() {
+            if segment.a == segment.b {
+                return None;
+            }
+            for vertex in [segment.a, segment.b] {
+                let pair = adjacent.get_mut(vertex)?;
+                *pair.iter_mut().find(|entry| entry.is_none())? = Some(i);
+            }
+        }
+        let mut path = Vec::with_capacity(self.segments.len());
+        let (mut vertex, mut edge) = (first.a, 0);
+        for _ in &self.segments {
+            let segment = self.segments.get(edge)?;
+            path.push(edge);
+            vertex = if segment.a == vertex { segment.b } else { segment.a };
+            if vertex == first.a {
+                return (path.len() == self.segments.len()).then_some(path);
+            }
+            let [Some(a), Some(b)] = *adjacent.get(vertex)? else { return None };
+            edge = if a == edge { b } else { a };
+        }
+        None
+    }
+}
+
 struct Reader<'b> {
     b: &'b [u8],
     pos: usize,

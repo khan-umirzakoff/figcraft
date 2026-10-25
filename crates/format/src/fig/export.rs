@@ -1040,10 +1040,26 @@ impl<'d> Exporter<'d> {
         let bound = self.bound(n);
         // Text whose own style sets fills paints with them (the layer's fills only show through
         // runs); a variable bound to the layer's fill colours the layer's.
-        let fills = match &n.kind {
+        let mut fills = match &n.kind {
             NodeKind::Text(TextData { style: TextStyle { fills: Some(own), .. }, .. }) => self.paints(own, true, &Bound::default()),
             _ => self.paints(&n.fills, true, &bound),
         };
+        if matches!(&n.kind, NodeKind::Vector { network } if network.regions.is_empty()) && !n.fills.is_empty() {
+            // Native readers infer fills from regionless contours; keep unused paints in our existing shape stash.
+            let original = serde_json::json!({"kind": n.kind, "fills": n.fills, "strokes": n.strokes, "stroke": n.stroke}).to_string();
+            f.push(("pluginData", arr(vec![o(vec![("pluginID", s(STASH.0)), ("value", s(&original)), ("key", s(STASH.1))])])));
+            let hidden: Vec<Paint> = n
+                .fills
+                .iter()
+                .cloned()
+                .map(|mut p| {
+                    p.visible = false;
+                    p
+                })
+                .collect();
+            fills = self.paints(&hidden, true, &bound);
+            self.warn("unfilled vectors export hidden paints and keep their original paints as plugin data for FigCraft");
+        }
         let strokes = self.paints(&n.strokes, false, &bound);
         f.extend([("fillPaints", fills), ("strokePaints", strokes)]);
         self.stroke(n, f);

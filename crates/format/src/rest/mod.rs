@@ -271,7 +271,7 @@ fn style_binding(slot: &str, key: &str) -> Option<String> {
     }
 }
 
-/// Put back the shape a layer was before the `.fig` export wrote it as the outline of its stroke
+/// Put back a shape and its paints stashed by `.fig` export (outlined strokes or unfilled vectors)
 /// (`outlinedStroke`: `{kind, fills, strokes, stroke}` as the document holds them). Anything that
 /// isn't such a shape is ignored.
 fn restore_stroke(n: &mut Node, original: &Value) -> bool {

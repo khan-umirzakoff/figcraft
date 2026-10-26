@@ -32,15 +32,6 @@ fn square(fills: Vec<Paint>, effects: Vec<Effect>) -> (Document, NodeId) {
     (d, r)
 }
 
-/// The standard normal distribution function (Abramowitz–Stegun 7.1.26 for erf).
-fn phi(z: f64) -> f64 {
-    let x = z.abs() / std::f64::consts::SQRT_2;
-    let t = 1.0 / (1.0 + 0.327_591_1 * x);
-    let poly = t * (0.254_829_592 + t * (-0.284_496_736 + t * (1.421_413_741 + t * (-1.453_152_027 + t * 1.061_405_429))));
-    let erf = 1.0 - poly * (-x * x).exp();
-    if z >= 0.0 { 0.5 * (1.0 + erf) } else { 0.5 * (1.0 - erf) }
-}
-
 #[test]
 fn new_effects_start_from_the_documented_defaults() {
     // A new shadow: offset 0, 4, blur 4, spread 0, black at 25%, normal blend, not shown behind
@@ -102,10 +93,7 @@ fn drop_shadows_move_by_the_offset_and_grow_by_the_spread() {
 
 #[test]
 fn blur_edges_follow_their_filter_kernel() {
-    // Layer/background blur uses the native-control triangular profile; shadows retain their
-    // existing Gaussian approximation pending separate caster/filter/composition validation.
-    let sigma = 10.0;
-    let edge = |d: f64| ((1.0 - phi(-d / sigma)) * 255.0).round() as u8;
+    // Layer/background blur and shadows use the native-control triangular profile.
     // Drop shadow of a white 120 × 120 square at (40, 40), black, no offset.
     let (mut d, p) = page();
     let r = rect(&mut d, p, (40.0, 40.0, 120.0, 120.0), vec![Paint::solid(Color::WHITE)]);
@@ -137,7 +125,7 @@ fn blur_edges_follow_their_filter_kernel() {
     for (why, pix, x, dist) in rows {
         let t = (dist / 20.0_f64).clamp(-1.0, 1.0);
         let tent = if t < 0.0 { 0.5 * (t + 1.0).powi(2) } else { 1.0 - 0.5 * (1.0 - t).powi(2) };
-        let (got, want) = (px(pix, x, 100)[1], if why == "drop shadow" { edge(dist) } else { (tent * 255.0).round() as u8 });
+        let (got, want) = (px(pix, x, 100)[1], (tent * 255.0).round() as u8);
         assert!(got.abs_diff(want) <= 8, "{why} at x {x}: {got} want {want}");
     }
 }
@@ -146,19 +134,18 @@ fn blur_edges_follow_their_filter_kernel() {
 fn shadows_show_behind_transparent_areas_only_when_asked() {
     // Off (the default), a drop shadow doesn't show through the layer: the parts it covers,
     // translucent ones included, hide the shadow. On, the shadow shows through them. The shadow
-    // is as strong as the layer's pixels are opaque (silent, pinned): a 50% fill casts a 50% one.
+    // uses opaque painted geometry even for a translucent positive-alpha paint.
     let stroke_only = |d: &mut Document, r: NodeId| {
         let n = d.get_mut(r).unwrap();
         n.strokes = vec![Paint::solid(hex("FF0000"))];
         (n.stroke.weight, n.stroke.align) = (4.0, StrokeAlign::Inside);
     };
     type Setup = fn(&mut Document, NodeId);
-    let half = [128, 128, 128];
     // (why, fill opacity (none: no fill), layer opacity, show behind, offset, extra, probes)
     type Row<'a> = (&'a str, Option<f32>, f32, bool, Pt, Option<Setup>, Probes);
     let rows: Vec<Row> = vec![
         ("off: a 50% fill shows the page, not the shadow, through it", Some(0.5), 1.0, false, (0.0, 0.0), None, vec![((70, 70), [255, 128, 128])]),
-        ("on: the shadow shows through the 50% fill", Some(0.5), 1.0, true, (0.0, 0.0), None, vec![((70, 70), [191, 64, 64])]),
+        ("on: the shadow shows through the 50% fill", Some(0.5), 1.0, true, (0.0, 0.0), None, vec![((70, 70), [128, 0, 0])]),
         (
             "off: outside the layer the shadow shows as ever",
             Some(0.5),
@@ -166,9 +153,9 @@ fn shadows_show_behind_transparent_areas_only_when_asked() {
             false,
             (10.0, 0.0),
             None,
-            vec![((95, 70), half), ((85, 70), [255, 128, 128])],
+            vec![((95, 70), BLACK), ((85, 70), [255, 128, 128])],
         ),
-        ("on: offset, it shows under the layer too", Some(0.5), 1.0, true, (10.0, 0.0), None, vec![((95, 70), half), ((85, 70), [191, 64, 64])]),
+        ("on: offset, it shows under the layer too", Some(0.5), 1.0, true, (10.0, 0.0), None, vec![((95, 70), BLACK), ((85, 70), [128, 0, 0])]),
         (
             "layer opacity fades the layer and its shadow together",
             Some(1.0),

@@ -57,9 +57,9 @@ fn a_background_blur_doesnt_change_the_shadow_its_layer_casts() {
         let want = render_node(&without, f, 1.0).unwrap();
         let diff = max_diff_below_pane(&got, &want);
         assert!(diff <= 2, "show behind {show_behind}: the shadow below the pane differs by {diff}");
-        // A 20% fill casts a faint shadow: the white between the stripes stays light.
+        // Positive paint opacity casts the opaque geometry; the backdrop doesn't enter its caster.
         let light = px(&got, 120, 140);
-        assert!(light[0] > 180, "show behind {show_behind}: {light:?}");
+        assert_eq!(light[0], 0, "show behind {show_behind}: {light:?}");
     }
 }
 

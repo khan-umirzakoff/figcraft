@@ -105,6 +105,23 @@ fn blend_modes_and_effects_through_commands() {
 
 #[test]
 fn exports_isolate_normal_groups_and_hide_shadows_behind_their_layer() {
+    use base64::Engine as _;
+    let shadow_png = |s: &Session, node| {
+        let out = svg(s, &[node]);
+        let encoded = out.split("data:image/png;base64,").nth(1).unwrap().split('"').next().unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).unwrap();
+        let d = s.doc().unwrap();
+        let b = figcraft_render::raster_bounds(d, node).unwrap();
+        let view = figcraft_render::View {
+            origin: (b.x0, b.y0),
+            scale: 2.0,
+            width: (b.width() * 2.0).ceil() as u32,
+            height: (b.height() * 2.0).ceil() as u32,
+        };
+        let rendered = figcraft_render::render_alone(d, node, &view, figcraft_render::Alone::WithEffects).unwrap();
+        assert!(bytes == figcraft_render::encode_png(&rendered).unwrap(), "SVG keeps the renderer's shadow pixels");
+        bytes
+    };
     let mut s = Session::new();
     let g = id(s.execute("frame.create", &json!({"x": 0, "y": 0, "width": 100, "height": 100})).unwrap());
     let k = rect(&mut s, Some(g), (10.0, 10.0, 50.0, 50.0), "#00FFFF");
@@ -118,35 +135,27 @@ fn exports_isolate_normal_groups_and_hide_shadows_behind_their_layer() {
     set(&mut s, g, json!({"blend": "normal"}));
     assert!(svg(&s, &[g]).contains("isolation:isolate"));
     assert!(figcraft_pdf::export_nodes_pdf(s.doc().unwrap(), &[g]).is_ok());
-    // A translucent layer's drop shadow is cut out by what the layer covers: the shadow's
-    // filter composites it "out" of an image of the layer's outline.
+    // Native geometric knockout is rendered into the SVG effect image.
     let r = rect(&mut s, None, (200.0, 0.0, 40.0, 40.0), "#FF0000");
     set(&mut s, r, json!({"effects": [{"type": "dropShadow", "offset": [10, 0], "radius": 0, "spread": 0}]}));
     s.execute("fill.set", &json!({"ids": [r], "opacity": 50})).unwrap();
-    let hidden = svg(&s, &[r]);
-    assert!(hidden.contains("result=\"cover\"") && hidden.contains("in2=\"cover\" operator=\"out\""), "{hidden}");
+    let hidden = shadow_png(&s, r);
     // Shown behind transparent areas: no cut-out.
     set(&mut s, r, json!({"effects": [{"type": "dropShadow", "offset": [10, 0], "radius": 0, "spread": 0, "showBehind": true}]}));
-    assert!(!svg(&s, &[r]).contains("operator=\"out\""));
-    // With spread (drawn as geometry), the cut-out goes into its blur filter.
+    assert!(shadow_png(&s, r) != hidden, "showBehind changes the rendered effect");
+    // Spread uses the same rendered geometric cut-out.
     set(&mut s, r, json!({"effects": [{"type": "dropShadow", "offset": [10, 0], "radius": 4, "spread": 3}]}));
-    assert!(svg(&s, &[r]).contains("in2=\"cover\" operator=\"out\""));
+    shadow_png(&s, r);
     // A group (no one outline) cuts its shadow out by its pixels.
     let grp = id(s.execute("object.group", &json!({"ids": [r]})).unwrap());
     set(&mut s, r, json!({"effects": []}));
     set(&mut s, grp, json!({"effects": [{"type": "dropShadow", "offset": [10, 0], "radius": 0, "spread": 0}]}));
-    assert!(svg(&s, &[grp]).contains("in2=\"SourceAlpha\" operator=\"out\""));
+    shadow_png(&s, grp);
     assert!(figcraft_pdf::export_nodes_pdf(s.doc().unwrap(), &[grp]).is_ok());
-    // The shadow's filter region reaches as far as the shadow (a share of a small layer's box
-    // would cut it off).
+    // Full finite support, even when the shadow lies far outside a small layer's box.
     let small = rect(&mut s, None, (400.0, 0.0, 10.0, 10.0), "#000000");
     set(&mut s, small, json!({"effects": [{"type": "dropShadow", "offset": [30, 0], "radius": 4, "spread": 0}]}));
     let out = svg(&s, &[small]);
-    let width = out
-        .split("filterUnits=\"userSpaceOnUse\"")
-        .nth(1)
-        .and_then(|t| t.split("width=\"").nth(1))
-        .and_then(|t| t.split('"').next())
-        .and_then(|w| w.parse::<f64>().ok());
-    assert!(width.is_some_and(|w| w >= 10.0 + 30.0 + 6.0), "{out}");
+    assert!(out.starts_with("<svg width=\"44\" height=\"18\""), "{out}");
+    shadow_png(&s, small);
 }

@@ -541,11 +541,12 @@ fn draw_layer(ctx: &Ctx, pix: &mut Pixmap, n: &Node, parent_xf: Affine, depth: u
     }
     let op = n.opacity.clamp(0.0, 1.0);
     {
-        // Inner shadows paint over the fills, under the children and strokes.
-        let inner = |l: &mut Pixmap| {
+        // Single-outline leaves use the active body over its paint; mixed outlines/children keep
+        // their existing fill/child/stroke ordering until native controls establish it.
+        let inner = |l: &mut Pixmap, sh: Option<&shadow::Outline>| {
             for e in n.effects.iter().filter(|e| e.visible) {
                 if let EffectKind::InnerShadow(s) = &e.kind
-                    && let Some(sh) = &shape
+                    && let Some(sh) = sh
                     && let Some(inner) = shadow::inner_shadow(sh, lw, lh, lxf, ctx.scale, s)
                 {
                     l.draw_pixmap(0, 0, inner.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
@@ -553,12 +554,30 @@ fn draw_layer(ctx: &Ctx, pix: &mut Pixmap, n: &Node, parent_xf: Affine, depth: u
             }
         };
         let has_inner = shape.is_some() && n.effects.iter().any(|e| e.visible && matches!(e.kind, EffectKind::InnerShadow(_)));
+        let geometry = (has_inner && shadow::geometric_body(n)).then(|| shadow::silhouette(ctx.doc, n)).flatten();
+        // shortcut: native single-outline leaves are covered; mixed outlines/children keep their existing order.
+        let deferred = has_inner
+            && shadow::geometric_body(n)
+            && n.children.is_empty()
+            && !matches!(n.kind, NodeKind::Text(_))
+            && geometry.as_ref().is_none_or(|g| g.len() == 1);
+        let over_fills = |l: &mut Pixmap| inner(l, shape.as_ref());
         // Backdrops further down see this layer composited onto `pix` (over its backdrop, when
         // that is kept apart for now).
         let under = Under { opacity: op, blend: n.blend, ..Under::new(pix, (lx, ly), ctx.under) };
         let over_back = first_back.as_ref().filter(|_| casts).map(|b| Under::new(b, (0, 0), Some(&under)));
         let content_under = over_back.as_ref().unwrap_or(&under);
-        draw_content(&Ctx { under: Some(content_under), ..*ctx }, &mut layer, n, lxf, depth, has_inner.then_some(&inner as &dyn Fn(&mut Pixmap)));
+        draw_content(
+            &Ctx { under: Some(content_under), ..*ctx },
+            &mut layer,
+            n,
+            lxf,
+            depth,
+            (has_inner && !deferred).then_some(&over_fills as &dyn Fn(&mut Pixmap)),
+        );
+        if deferred && let Some([outline]) = geometry.as_deref() {
+            inner(&mut layer, Some(outline));
+        }
     }
     // A group is no outline of its own: its inner shadows are cast from around what its layers
     // draw together, over them.

@@ -3,15 +3,12 @@
 //! Export writes one `<svg>` sized to the exported nodes' bounds. Shapes become `<path>`s with
 //! their fills (solid, linear/radial gradients; angular and diamond fall back to their first
 //! colour... or a raster pattern), strokes are written as filled outlines so Inside/Outside
-//! alignment survives exactly, text is outlined, images are embedded as data URIs, and shadows
-//! become SVG filters. Shadow spread offsets the outline like the renderer (the shape
-//! stroked twice the spread wide with mitred joins, cut away with a mask to shrink); inner shadows
-//! are masked, blurred rectangles clipped to the shape, over the fills and under the strokes.
+//! alignment survives exactly, text is outlined and images are embedded as data URIs.
 //!
 //! What SVG filters can't match is drawn by the renderer and embedded as PNG images, so it looks
 //! like the canvas: noise grains over the vector layer (crisp, blended with the noise's blend
 //! mode), background blur and glass from a render of what lies under the layer among the exported
-//! layers, and layers with texture or layer blur whole (SVG's Gaussian filter is a different kernel).
+//! layers, and layers with texture, layer blur or shadows whole (SVG's Gaussian filter is a different kernel).
 //!
 //! Import (via usvg) turns an SVG file into an editable frame: groups, shapes, text, gradients,
 //! masks and effects (see [`import_svg_with_notes`]).
@@ -757,15 +754,14 @@ impl W<'_> {
         self.image(&pix, &view, &op)
     }
 
-    /// Layers whose look SVG can't build (texture scatters pixels; layer blur uses a triangular
+    /// Layers whose look SVG can't build (texture scatters pixels; blurs/shadows use a triangular
     /// kernel rather than SVG's Gaussian) are drawn by the renderer and
     /// embedded whole, over their backdrop effects. False when the layer isn't one of them (or
     /// can't be rendered): it is written as vectors.
     fn raster_whole(&mut self, id: NodeId, n: &Node, id_attr: &str) -> bool {
-        let has = |f: &dyn Fn(&EffectKind) -> bool| n.effects.iter().any(|e| e.visible && f(&e.kind));
-        let whole = has(&|k| matches!(k, EffectKind::Texture(_) | EffectKind::LayerBlur(_)))
-            // A group's inner shadows are cast by its layers' pixels, over them.
-            || (matches!(n.kind, NodeKind::Group) && has(&|k| matches!(k, EffectKind::InnerShadow(_))));
+        let whole = n.effects.iter().any(|e| {
+            e.visible && matches!(e.kind, EffectKind::Texture(_) | EffectKind::LayerBlur(_) | EffectKind::DropShadow(_) | EffectKind::InnerShadow(_))
+        });
         if !whole {
             return false;
         }

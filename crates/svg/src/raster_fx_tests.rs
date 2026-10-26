@@ -98,7 +98,7 @@ fn background_blur_is_drawn_from_what_lies_beneath() {
 }
 
 #[test]
-fn inner_shadows_go_over_fills_and_under_strokes() {
+fn mixed_fill_stroke_inner_shadows_keep_the_renderer_order() {
     let shadow = Shadow { color: Color::from_hex("FF0000").unwrap(), offset: (0.0, 0.0), radius: 8.0, spread: 4.0, ..Shadow::default() };
     let (mut d, n) = layer(vec![EffectKind::InnerShadow(shadow)]);
     let node = d.get_mut(n).unwrap();
@@ -106,11 +106,12 @@ fn inner_shadows_go_over_fills_and_under_strokes() {
     node.stroke.weight = 10.0;
     node.stroke.align = StrokeAlign::Inside;
     let svg = export(&d, &[n]);
-    let fill = svg.find(&format!("fill=\"{FILL}\"")).unwrap();
-    let shadow = svg.find("<g clip-path=").unwrap();
-    // A simplified stroke (an inside stroke on a box is a stroke attribute).
-    let stroke = svg.find(&format!("stroke=\"{STROKE}\"")).unwrap();
-    assert!(fill < shadow && shadow < stroke, "{svg}");
+    use base64::Engine as _;
+    let encoded = svg.split("data:image/png;base64,").nth(1).unwrap().split('"').next().unwrap();
+    let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).unwrap();
+    let pixels = Pixmap::decode_png(&bytes).unwrap();
+    let left = ((pixels.height() / 2 * pixels.width() + 2) * 4) as usize;
+    assert_eq!(&pixels.data()[left..left + 4], &[0, 255, 0, 255], "mixed-outline fallback keeps its green stroke over the inner shadow");
 }
 
 #[test]

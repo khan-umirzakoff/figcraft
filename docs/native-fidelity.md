@@ -97,8 +97,9 @@ floating between the two passes and resolve to bytes once; no gamma, radius or
 sample phase was fitted to native images. Layer-blur export bounds use the same
 full-radius support: the native 256×128 radius12 control exports at 560×304
 at 2×; asking explicitly for the geometric box still crops it to 512×256.
-Shadows and glass retain their
-previous Gaussian approximation and are not covered by this filter change.
+At `d8fdac8`, shadows and glass retained their previous Gaussian approximation.
+The subsequent [native shadow correction](native-shadows.md) shares this kernel
+for shadows; glass frost remains outside this filter acceptance.
 
 The evidence replay expanded to 36 intact native carriers: 28 original PNG
 comparisons and eight import-only controls. Complete imported document JSON is
@@ -115,7 +116,8 @@ byte-identical before/after. The renderer never reads the native PNGs.
 These are residual measurements, not passing parity tolerances. All straight
 RGBA differences, including RGB under transparent pixels, are retained in the
 local report. Primitive AA, correlated edges/groups/masks and shadow residuals
-remain unchanged. The zero-paint correction is bounded to layers with explicit
+were unchanged by the uniform-blur arc; the subsequent shadow correction is
+recorded separately. The zero-paint correction is bounded to layers with explicit
 fully transparent paints and no children or visible stroke; arbitrary paint
 coverage masks and no-fill rectangles remain unaccepted. A fresh native
 no-fill vector control clears both paints and regions and already renders
@@ -204,3 +206,7 @@ The final replay imports all 38 carriers without warnings; the 36 retained
 document JSON files are byte-identical to their baselines. Primitive AA,
 correlated composition, shadows, progressive blur and prototype motion still
 need native corrections/acceptance. There is no 1:1 MVP acceptance from this arc.
+
+The subsequent [native shadow controls and correction](native-shadows.md)
+separate geometric caster/body/knockout, reduce the rectangular shadow errors
+and retain unresolved curve residuals. They do not change the MVP status.

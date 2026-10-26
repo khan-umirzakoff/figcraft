@@ -29,14 +29,53 @@ pub type Outline = (BezPath, FillRule);
 /// (when a fill shows) and its stroke area. `None` when the layer's pixels aren't those outlines:
 /// groups, frames that don't clip their children or show no fill, text with a stroke.
 pub fn silhouette(doc: &Document, n: &Node) -> Option<Vec<Outline>> {
-    outlines(doc, n, |f| f.visible && f.opacity > 0.0)
+    outlines(doc, n, active)
 }
 
-/// The area a node's paints cover, in local space: the outline of its visible fills (translucent
-/// or at 0% too) and its stroke area; what hides its drop shadows unless they show behind
-/// transparent areas. `None` where [`silhouette`] is.
+fn active(p: &figcraft_color::Paint) -> bool {
+    p.visible
+        && p.opacity > 0.0
+        && match &p.kind {
+            figcraft_color::PaintKind::Solid { color } => color.a > 0.0,
+            figcraft_color::PaintKind::Gradient(g) => g.stops.iter().any(|s| s.color.a > 0.0),
+            _ => true,
+        }
+}
+
+/// Native controls distinguish opaque painted geometry from translucent paint pixels.
+/// Images, spatial zero-alpha stops and moving effects retain the pixel-caster path.
+pub(crate) fn geometric_body(n: &Node) -> bool {
+    n.children.is_empty()
+        && !matches!(n.kind, NodeKind::Text(_))
+        && n.effects.iter().all(|e| {
+            !e.visible
+                || matches!(e.kind, EffectKind::DropShadow(_) | EffectKind::InnerShadow(_) | EffectKind::BackgroundBlur(_) | EffectKind::Glass(_))
+        })
+        && n.fills.iter().chain(&n.strokes).filter(|p| active(p)).all(|p| match &p.kind {
+            figcraft_color::PaintKind::Solid { .. } => true,
+            figcraft_color::PaintKind::Gradient(g) => {
+                matches!(g.kind, figcraft_color::GradientKind::Linear | figcraft_color::GradientKind::Radial)
+                    && g.stops.iter().all(|s| s.color.a > 0.0)
+            }
+            _ => false,
+        })
+}
+
+/// Default-drop knockout in local space: visible fill/stroke geometry and, for a recorded closed
+/// stroke-only vector, its interior too. This differs from the active painted caster.
+/// `None` where [`silhouette`] is.
 pub fn cover(doc: &Document, n: &Node) -> Option<Vec<Outline>> {
-    outlines(doc, n, |f| f.visible)
+    let mut out = outlines(doc, n, |f| f.visible)?;
+    if geometric_body(n)
+        && !n.fills.iter().any(|p| p.visible)
+        && n.has_visible_stroke()
+        && matches!(&n.kind, NodeKind::Vector { network } if !network.regions.is_empty())
+        && let Some(region) = node_outline(doc, n)
+    {
+        // A native closed stroke knocks out its recorded interior as well as its ring.
+        out.push(region);
+    }
+    Some(out)
 }
 
 fn outlines(doc: &Document, n: &Node, fill_counts: fn(&figcraft_color::Paint) -> bool) -> Option<Vec<Outline>> {
@@ -59,7 +98,7 @@ fn outlines(doc: &Document, n: &Node, fill_counts: fn(&figcraft_color::Paint) ->
     {
         out.push(o);
     }
-    if n.has_visible_stroke() {
+    if n.stroke.weight > 0.0 && n.strokes.iter().any(fill_counts) {
         let geom = if is_bool { outline.map(|(p, _)| p) } else { figcraft_doc::geometry::stroke_geometry(n) };
         if let Some(g) = geom {
             out.push(((*stroke_area(n, &g, closed)).clone(), stroke_rule(n, closed)));
@@ -153,7 +192,7 @@ pub struct Caster<'a> {
     pub xf: Affine,
     /// Device pixels per document unit.
     pub scale: f64,
-    /// See [`silhouette`]; only when a shadow spreads.
+    /// See [`silhouette`]; a geometric caster where supported, also when a shadow spreads.
     pub silhouette: Option<Vec<Outline>>,
     /// The node's [`cover`] in the layer's pixels; only when a shadow hides behind the layer.
     pub cover: Option<Pixmap>,
@@ -177,7 +216,7 @@ pub fn hiding_cover(doc: &Document, n: &Node) -> Option<Vec<Outline>> {
 impl<'a> Caster<'a> {
     /// What casts node `n`'s drop shadows from its `layer` (local → pixels through `xf`).
     pub fn new(doc: &Document, n: &Node, layer: &'a Pixmap, xf: Affine, scale: f64) -> Self {
-        let silhouette = if drop_shadows(n).any(|s| s.spread != 0.0) { silhouette(doc, n) } else { None };
+        let silhouette = if drop_shadows(n).any(|s| s.spread != 0.0 || geometric_body(n)) { silhouette(doc, n) } else { None };
         let cover = hiding_cover(doc, n).and_then(|c| spread_alpha(&c, 0.0, xf, layer.width(), layer.height()));
         Caster { layer, xf, scale, silhouette, cover }
     }
@@ -191,7 +230,7 @@ pub fn drop_shadow(c: &Caster, s: &Shadow) -> Option<Pixmap> {
     let (dx, dy) = (s.offset.0 * c.scale, s.offset.1 * c.scale);
     let spread = if s.spread.is_finite() { s.spread } else { 0.0 };
     let mut sh = match c.silhouette.as_deref() {
-        Some(sil) if spread != 0.0 && dx.is_finite() && dy.is_finite() => spread_alpha(sil, spread, Affine::translate((dx, dy)) * c.xf, w, h)?,
+        Some(sil) if dx.is_finite() && dy.is_finite() => spread_alpha(sil, spread, Affine::translate((dx, dy)) * c.xf, w, h)?,
         _ => {
             let mut base = c.layer.clone();
             fx::morph(&mut base, whole_px(spread * c.scale));
@@ -200,7 +239,7 @@ pub fn drop_shadow(c: &Caster, s: &Shadow) -> Option<Pixmap> {
             out
         }
     };
-    fx::blur(&mut sh, s.radius / 2.0 * c.scale);
+    crate::tent::blur(&mut sh, s.radius * c.scale);
     fx::tint(&mut sh, color4(s.color));
     if !s.show_behind {
         fx::mask_by(&mut sh, c.cover.as_ref().unwrap_or(c.layer), true);
@@ -249,7 +288,7 @@ pub fn inner_shadow_of(cover: &Pixmap, scale: f64, s: &Shadow) -> Option<Pixmap>
 /// spread), `pad` pixels larger each way than the layer, whose pixels `cover` the shape.
 fn inner_from(mut big: Pixmap, pad: u32, cover: &Pixmap, scale: f64, s: &Shadow) -> Option<Pixmap> {
     fx::invert_alpha(&mut big);
-    fx::blur(&mut big, s.radius / 2.0 * scale);
+    crate::tent::blur(&mut big, s.radius * scale);
     let mut out = Pixmap::new(cover.width(), cover.height())?;
     let pad = i32::try_from(pad).ok()?;
     out.draw_pixmap(

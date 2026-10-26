@@ -1,6 +1,6 @@
 use super::*;
 use figcraft_color::{Color, Paint};
-use figcraft_doc::{Document, Effect, NodeKind};
+use figcraft_doc::{Document, NodeKind};
 
 #[test]
 fn export_basic_shapes() {
@@ -9,11 +9,10 @@ fn export_basic_shapes() {
     let f = d.create(p, NodeKind::Frame, "Card", 0.0, 0.0, 200.0, 100.0).unwrap();
     let r = d.create(f, NodeKind::Rectangle, "R", 10.0, 10.0, 50.0, 50.0).unwrap();
     d.get_mut(r).unwrap().fills = vec![Paint::solid(Color::from_hex("FF0000").unwrap())];
-    d.get_mut(r).unwrap().effects.push(Effect::drop_shadow());
     let svg = export_svg(&d, &[f], &SvgOptions::default()).unwrap();
     assert!(svg.starts_with("<svg width=\"200\" height=\"100\""));
     assert!(svg.contains("#FF0000"));
-    assert!(svg.contains("<filter"));
+    assert!(!svg.contains("<image"), "ordinary shapes stay editable SVG vectors");
     assert!(svg.contains("clip-path"));
     // Round-trip through import.
     let mut d2 = Document::new("t2");

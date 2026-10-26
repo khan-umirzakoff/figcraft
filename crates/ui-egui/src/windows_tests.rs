@@ -231,7 +231,8 @@ fn the_unsaved_changes_question_offers_save_dont_save_and_cancel() {
     let (ctx, mut app, _) = asking(None, vec![]);
     ctx.enable_accesskit();
     frame(&ctx, &mut app, false);
-    let out = ctx.run_ui(RawInput::default(), |ui| app.ui(ui));
+    let mut out = ctx.run_ui(RawInput::default(), |ui| app.ui(ui));
+    out.textures_delta.clear();
     let nodes = out.platform_output.accesskit_update.expect("an AccessKit update").nodes;
     let buttons: Vec<String> =
         nodes.iter().filter(|(_, n)| n.role() == egui::accesskit::Role::Button).filter_map(|(_, n)| n.label().map(str::to_string)).collect();

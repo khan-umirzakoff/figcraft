@@ -155,3 +155,67 @@ grid, retain maximum 16. Their identity output again reproduces the current
 renderer. No viewport quantization, epsilon, orientation correction or
 failed-pixel rule was added to the product. More independent native dimensions
 and curve evidence are required before treating this hypothesis as a correction.
+
+## Fresh cubic follow-up and rejected regressions
+
+A further ordinary native UI export captures the original 800×608 cubic grid at
+1x. Both complete native saves retain 434 layers and 31 pages without import
+warnings. Relative to the previous complete native save, the entire typed-model
+ledger contains only the added default 1x export preset. After removing it,
+another native save has a typed model identical to the baseline; all three
+candidate PNGs are byte-identical. These are complete typed-model ledgers, not
+an independent raw-schema field oracle.
+
+The new native residual is RGBA [255,255,255,16], including transparent RGB;
+premultiplied RGBA is [16,16,16,16], with 1,309 differing pixels. It is a retained
+failure. The full file also passes attached/headless MCP open, inspect, export,
+save/reopen, edit, Undo/Redo and rollback (26/22 requests). Source preset changes
+do not explain the residual. Native build identity remains unknown.
+Three further unmodified native 1x exports match the initial PNG byte-for-byte,
+including all RGBA pixels. This observed residual is therefore repeatable in
+this UI route; no native-export noise allowance is claimed.
+
+Additional whole-frame diagnostics reject a viewport fix: f32 NDC plus f32
+viewport improves selected 1x line controls from max32 to1 but regresses the
+axis grid from max1 to32. The original/fresh cubic controls remain at16.
+Separate integral-cubic implicit classification follows the publicly published
+[Loop/Blinn paper](https://www.microsoft.com/en-us/research/wp-content/uploads/2005/01/p1000-loop.pdf),
+using its equations and original source geometry. Its f64 predictions reproduce
+the current bisection renderer byte-for-byte. Predeclared local/world f32
+variants worsen the historical maximum to17 and retain fresh max16. Neither
+diagnostic changes the product. No incumbent implementation body was read.
+
+Local follow-up evidence is gitignored `plan/figma/cubic-precision-20261026/`;
+the original 124 frozen inputs and protected predecessor files still match.
+The successful renderer/control arc remains `3b64680`; this follow-up makes
+no further fidelity or MVP acceptance claim.
+
+The follow-up gate exposed an existing test-harness cleanup omission: the
+unsaved-changes accessibility test dropped an unconsumed egui texture delta.
+It now clears the headless frame's texture output, like the adjacent helpers;
+the Save/Don't Save/Cancel assertions are unchanged. This is test-only cleanup,
+not a production renderer/dialog change. The failed gate is retained locally.
+The focused regression and complete CI/WASM gate pass after that cleanup.
+
+## Independent cubic shapes
+
+A new synthetic native page contains four independently authored convex,
+concave, backtracking and Y-extremum cubic families at two phases. The own SVG
+builder was frozen before native pixels were read. Ordinary UI exports at
+1x/2x retain the complete 452-layer, 32-page native files. Their whole typed-model
+ledger differs only in the root frame's export scale 1→2; no projected fixture
+or image fill is used. No independent raw-schema oracle is claimed for these
+new files.
+
+Against the unpatched `69aea87` CLI, maximum alpha improves 33→16 at 1x and
+65→17 at 2x; differing alpha pixels fall 1,478→506 and 2,885→519. Candidate RGB
+matches native exactly at both scales. The committed CLI and direct probe agree
+on complete RGBA. These are retained residuals, not accepted error thresholds.
+
+Headless MCP passes both original files through open, inspect, export,
+save/reopen, edit, Undo/Redo and rollback. The first attached open times out
+after a long idle interval; an independent state request also times out with
+the app alive and idle. That failed receipt is retained. The earlier logic
+dispatch fix and successful 28-scene run do not prove that the native event loop
+wakes in every covered/idle-window state. This reliability issue remains open
+alongside cubic AA; it is not a successful attached check for these new files.

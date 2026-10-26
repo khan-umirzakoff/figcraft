@@ -44,7 +44,7 @@ fn reach_and_backdrop_cover_the_largest_radius() {
     assert_eq!(b.max_radius(), 30.0);
     // A uniform blur ignores the progressive start radius.
     assert_eq!(Blur { blur_type: BlurType::Uniform, ..b.clone() }.max_radius(), 2.0);
-    assert_eq!(Effect { kind: EffectKind::LayerBlur(b.clone()), visible: true }.reach(), 45.0);
+    assert_eq!(Effect { kind: EffectKind::LayerBlur(b.clone()), visible: true }.reach(), 30.0);
     assert_eq!(Effect { kind: EffectKind::BackgroundBlur(b.clone()), visible: true }.backdrop_radius(), 30.0);
     // Scaling scales both radii, never the unit-box points.
     let s = b.scaled(2.0);

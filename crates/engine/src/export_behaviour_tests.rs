@@ -211,6 +211,12 @@ fn what_an_export_covers() {
     // Include bounding box: the layer's box, whatever it paints outside it.
     let b = export(&mut s, json!({"ids": [r], "includeBoundingBox": true}));
     assert_eq!(png_size(&b), (100, 100), "include bounding box exports the layer's own box");
+    // Native uniform layer blur has finite full-radius support (256×128 at radius12 → 560×304 at2×).
+    let blurred = rect(&mut s, 600.0, 0.0, 256.0, 128.0, "#D9D9D9", None);
+    set(&mut s, &[blurred], json!({"effects": [{"type": "layerBlur", "radius": 12.0}]}));
+    assert_eq!(size(&mut s, blurred), (280, 152));
+    assert_eq!(png_size(&export(&mut s, json!({"ids": [blurred], "scale": 2.0}))), (560, 304));
+    assert_eq!(png_size(&export(&mut s, json!({"ids": [blurred], "scale": 2.0, "includeBoundingBox": true}))), (512, 256));
     // Frames: clipping frames export their box, others everything they hold.
     let clip = frame(&mut s, 0.0, 800.0, 100.0, 100.0, true);
     rect(&mut s, 50.0, 50.0, 100.0, 100.0, "#00FF00", Some(clip));

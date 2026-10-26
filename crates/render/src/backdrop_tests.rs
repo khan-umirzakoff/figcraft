@@ -11,6 +11,24 @@ use super::*;
 
 const BLUR: f64 = 12.0;
 
+#[test]
+fn transparent_solid_paint_does_not_activate_background_blur() {
+    let (mut d, f, pane) = scene(Holder::ClipFrame);
+    let mut without = d.clone();
+    without.get_mut(pane).unwrap().visible = false;
+    let expected = render_node(&without, f, 2.0).unwrap();
+    for (alpha, opacity) in [(0.0, 1.0), (1.0, 0.0)] {
+        let n = d.get_mut(pane).unwrap();
+        let mut paint = Paint::solid(Color::WHITE);
+        paint.kind = figcraft_color::PaintKind::Solid { color: Color::WHITE.with_alpha(alpha) };
+        paint.opacity = opacity;
+        n.fills = vec![paint];
+        assert!(render_node(&d, f, 2.0).unwrap().data() == expected.data(), "alpha {alpha}, paint opacity {opacity}");
+    }
+    d.get_mut(pane).unwrap().fills = vec![Paint::solid(Color::WHITE.with_alpha(0.01))];
+    assert!(render_node(&d, f, 2.0).unwrap().data() != expected.data());
+}
+
 fn solid(d: &mut Document, id: NodeId, hex: &str) {
     d.get_mut(id).unwrap().fills = vec![Paint::solid(Color::from_hex(hex).unwrap())];
 }
@@ -88,14 +106,14 @@ fn max_diff(a: &Pixmap, b: &Pixmap) -> u8 {
     a.data().iter().zip(b.data()).map(|(p, q)| p.abs_diff(*q)).max().unwrap_or(0)
 }
 
-/// The scene's frame exported without the pane, blurred (sigma = radius / 2): what the pane
+/// The scene's frame exported without the pane, blurred: what the pane
 /// must show.
 fn expected_blurred(d: &Document, f: NodeId, pane: NodeId, scale: f64) -> (Pixmap, Pixmap) {
     let mut without = d.clone();
     without.get_mut(pane).unwrap().visible = false;
     let back = render_node(&without, f, scale).unwrap();
     let mut blurred = back.clone();
-    fx::blur(&mut blurred, BLUR / 2.0 * scale);
+    crate::tent::blur(&mut blurred, BLUR * scale);
     (back, blurred)
 }
 
@@ -199,7 +217,8 @@ fn glass_centre_is_the_frosted_backdrop() {
     let g = Glass { frost: BLUR, depth: 10.0, ..Glass::default() };
     let (d, f, pane) = glass_scene(g);
     let got = render_node(&d, f, 1.0).unwrap();
-    let (_, want) = expected_blurred(&d, f, pane, 1.0);
+    let (mut want, _) = expected_blurred(&d, f, pane, 1.0);
+    fx::blur(&mut want, BLUR / 2.0);
     // Further than `depth` from the edge nothing bends and no light falls.
     let mut worst = 0;
     for y in 55..105 {

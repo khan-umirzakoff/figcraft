@@ -1,10 +1,11 @@
-//! Layer and background blurs: uniform (one Gaussian) or progressive (the radius ramps linearly
+//! Layer and background blurs: uniform or progressive (the radius ramps linearly
 //! along a line, from a start radius at its start point to an end radius at its end point).
 //!
 //! A progressive blur blurs the pixels at a few radii between its smallest and largest radius,
 //! spaced geometrically (steps between small radii show the most), and blends every pixel between
-//! the two levels around its own radius. Each level is one Gaussian-like blur (three box passes,
-//! linear in the pixel count whatever the radius), so the cost is a handful of uniform blurs.
+//! the two levels around its own radius. Each level uses a pixel-integrated triangular kernel,
+//! linear in the pixel count whatever the radius, so the cost is a handful of uniform blurs.
+// shortcut: progressive levels interpolate the uniform filter; native progressive sampling is unverified.
 
 use figcraft_doc::Blur;
 use figcraft_geom::{Affine, Point};
@@ -23,14 +24,14 @@ pub fn apply(p: &mut Pixmap, b: &Blur, size: (f64, f64), xf: Affine, scale: f64)
     let b = b.sanitized();
     let sigma = |r: f64| r / 2.0 * scale;
     if !b.is_progressive() {
-        fx::blur(p, sigma(b.radius));
+        crate::tent::blur(p, b.radius * scale);
         return;
     }
     let at = |u: (f64, f64)| xf * Point::new(u.0 * size.0, u.1 * size.1);
     progressive(p, sigma(b.start_radius), sigma(b.radius), at(b.start), at(b.end));
 }
 
-/// The blur's standard deviation along the line: `s0` at `a` and before it, `s1` at `b` and past
+/// The blur's half-support along the line: `s0` at `a` and before it, `s1` at `b` and past
 /// it, linear in between (pixels).
 struct Ramp {
     s0: f64,
@@ -89,13 +90,13 @@ fn bracket(levels: &[f64], s: f64) -> (u8, u8) {
     (k as u8, (f * 255.0).round() as u8)
 }
 
-/// A progressive blur of `p`: standard deviation `s0` at pixel point `a` (and before it) to `s1`
+/// A progressive blur of `p`: half-support `s0` at pixel point `a` (and before it) to `s1`
 /// at `b` (and past it). A degenerate line blurs with `s1` everywhere.
 pub fn progressive(p: &mut Pixmap, s0: f64, s1: f64, a: Point, b: Point) {
     let cap = |s: f64| if s.is_finite() { s.clamp(0.0, fx::MAX_SIGMA) } else { 0.0 };
     let (s0, s1) = (cap(s0), cap(s1));
     let Some(ramp) = Ramp::new(s0, s1, a, b).filter(|_| (s1 - s0).abs() >= 0.05) else {
-        fx::blur(p, s1);
+        crate::tent::blur(p, s1 * 2.0);
         return;
     };
     let (w, h) = (p.width(), p.height());
@@ -134,7 +135,7 @@ pub fn progressive(p: &mut Pixmap, s0: f64, s1: f64, a: Point, b: Point) {
         let (cx, cy) = (x0.saturating_sub(reach), y0.saturating_sub(reach));
         let (cw, ch) = ((x1 + reach + 1).min(w) - cx, (y1 + reach + 1).min(h) - cy);
         let Some(mut level) = tiny_skia::IntRect::from_xywh(cx as i32, cy as i32, cw, ch).and_then(|r| p.clone_rect(r)) else { continue };
-        fx::blur(&mut level, *s);
+        crate::tent::blur(&mut level, *s * 2.0);
         let ld = level.data();
         let row = cw as usize * 4;
         for y in y0..=y1 {

@@ -1,5 +1,5 @@
 //! Effects SVG filters can't match, embedded as renders: noise grains over the vector layer,
-//! texture and progressive layer blur whole, background blur from what lies beneath; inner shadows
+//! texture and layer blur whole, background blur from what lies beneath; inner shadows
 //! over the fills and under the strokes. Every export stays valid SVG and is deterministic.
 
 use figcraft_color::{BlendMode, Color, Paint};
@@ -48,8 +48,12 @@ fn noise_is_a_crisp_grain_image_over_the_vector_layer() {
 }
 
 #[test]
-fn texture_and_progressive_layer_blur_embed_the_layer_whole() {
-    for kind in [EffectKind::Texture(Texture { radius: 3.0, ..Texture::default() }), EffectKind::LayerBlur(progressive())] {
+fn texture_and_layer_blur_embed_the_layer_whole() {
+    for kind in [
+        EffectKind::Texture(Texture { radius: 3.0, ..Texture::default() }),
+        EffectKind::LayerBlur(progressive()),
+        EffectKind::LayerBlur(Blur::uniform(6.0)),
+    ] {
         let (d, n) = layer(vec![kind.clone()]);
         let svg = export(&d, &[n]);
         assert!(!svg.contains("<path"), "{kind:?}: {svg}");
@@ -57,12 +61,21 @@ fn texture_and_progressive_layer_blur_embed_the_layer_whole() {
         assert_eq!(svg.matches("<image").count(), 1, "{kind:?}: {svg}");
         assert_eq!(svg, export(&d, &[n]), "deterministic");
     }
-    // Noise over a uniform blur depends on their order: whole too. A uniform blur alone stays a filter.
+    // Noise over a uniform blur depends on their order: whole too.
     let (d, n) = layer(vec![EffectKind::LayerBlur(Blur::uniform(6.0)), EffectKind::Noise(Noise::default())]);
     assert!(!export(&d, &[n]).contains("<path"));
-    let (d, n) = layer(vec![EffectKind::LayerBlur(Blur::uniform(6.0))]);
+}
+
+#[test]
+fn uniform_blur_embeds_the_renderers_pixels_including_its_shadow() {
+    use base64::Engine as _;
+    let (d, n) = layer(vec![EffectKind::DropShadow(Shadow::default()), EffectKind::LayerBlur(Blur::uniform(6.0))]);
     let svg = export(&d, &[n]);
-    assert!(svg.contains("<feGaussianBlur in=\"SourceGraphic\" stdDeviation=\"3\"") && !svg.contains("<image"), "{svg}");
+    let encoded = svg.split("data:image/png;base64,").nth(1).unwrap().split('"').next().unwrap();
+    let png = base64::engine::general_purpose::STANDARD.decode(encoded).unwrap();
+    let view = raster_view(figcraft_render::raster_bounds(&d, n).unwrap(), RASTER_SCALE).unwrap();
+    let expected = figcraft_render::render_alone(&d, n, &view, Alone::WithEffects).unwrap();
+    assert!(png == figcraft_render::encode_png(&expected).unwrap());
 }
 
 #[test]

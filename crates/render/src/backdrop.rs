@@ -132,6 +132,17 @@ pub fn effects(n: &Node, shape: &Outline, back: &Pixmap, pad: u32, w: u32, h: u3
     for e in n.effects.iter().filter(|e| e.visible) {
         let layer = match &e.kind {
             EffectKind::BackgroundBlur(blur) if blur.max_radius() > 0.0 => {
+                // Native solid-paint controls cull zero coverage before reading the backdrop.
+                // shortcut: nonuniform paint masks and child/stroke coverage still use the outline.
+                if !n.fills.is_empty()
+                    && n.children.is_empty()
+                    && !n.has_visible_stroke()
+                    && n.fills
+                        .iter()
+                        .all(|f| !f.visible || f.opacity <= 0.0 || matches!(&f.kind, figcraft_color::PaintKind::Solid { color } if color.a <= 0.0))
+                {
+                    continue;
+                }
                 let mut b = back.clone();
                 crate::blur::apply(&mut b, blur, (n.width, n.height), Affine::translate((f64::from(pad), f64::from(pad))) * xf, scale);
                 let mut l = Pixmap::new(w, h)?;

@@ -101,10 +101,9 @@ fn drop_shadows_move_by_the_offset_and_grow_by_the_spread() {
 }
 
 #[test]
-fn blurs_spread_by_a_gaussian_of_half_the_radius() {
-    // The blur value is the CSS blur radius (what code inspection shows for it), which CSS turns
-    // into a Gaussian with a standard deviation of half the radius: across a straight edge the
-    // coverage falls off as the normal distribution function. Radius 20: sigma 10.
+fn blur_edges_follow_their_filter_kernel() {
+    // Layer/background blur uses the native-control triangular profile; shadows retain their
+    // existing Gaussian approximation pending separate caster/filter/composition validation.
     let sigma = 10.0;
     let edge = |d: f64| ((1.0 - phi(-d / sigma)) * 255.0).round() as u8;
     // Drop shadow of a white 120 × 120 square at (40, 40), black, no offset.
@@ -136,7 +135,9 @@ fn blurs_spread_by_a_gaussian_of_half_the_radius() {
         ("background blur", &back, 170, 10.5),
     ];
     for (why, pix, x, dist) in rows {
-        let (got, want) = (px(pix, x, 100)[1], edge(dist));
+        let t = (dist / 20.0_f64).clamp(-1.0, 1.0);
+        let tent = if t < 0.0 { 0.5 * (t + 1.0).powi(2) } else { 1.0 - 0.5 * (1.0 - t).powi(2) };
+        let (got, want) = (px(pix, x, 100)[1], if why == "drop shadow" { edge(dist) } else { (tent * 255.0).round() as u8 });
         assert!(got.abs_diff(want) <= 8, "{why} at x {x}: {got} want {want}");
     }
 }
@@ -313,13 +314,13 @@ fn effects_stack_in_list_order() {
 #[test]
 fn background_blur_shows_through_the_fill_inside_the_shape() {
     // Black left of x = 100 under a pane (50..150) with a background blur of 20: at x = 110 the
-    // blurred backdrop is 218 (sigma 10, 10.5 px past the edge).
-    let blurred = 218;
+    // triangular CDF at 10.5 / 20 gives 226 after byte resolve.
+    let blurred = 226;
     // (why, pane fills, pixel, colour there)
     let rows: Vec<(&str, Vec<Paint>, Px, [u8; 3])> = vec![
-        ("no fill: the blurred backdrop", vec![], (110, 100), [blurred; 3]),
-        ("a 0% fill: the blurred backdrop", vec![solid_at("FF0000", 0.0)], (110, 100), [blurred; 3]),
-        ("a 50% fill paints over the blurred backdrop", vec![solid_at("FF0000", 0.5)], (110, 100), [236, 109, 109]),
+        ("no fill: legacy outline coverage (native rectangle case unverified)", vec![], (110, 100), [blurred; 3]),
+        ("a 0% fill leaves the backdrop unfiltered", vec![solid_at("FF0000", 0.0)], (110, 100), WHITE),
+        ("a 50% fill paints over the blurred backdrop", vec![solid_at("FF0000", 0.5)], (110, 100), [241, 113, 113]),
         ("an opaque fill hides it", vec![Paint::solid(hex("FF0000"))], (110, 100), RED),
         ("outside the shape nothing is blurred", vec![], (110, 160), WHITE),
         ("outside the shape nothing is blurred (dark side)", vec![], (90, 160), BLACK),

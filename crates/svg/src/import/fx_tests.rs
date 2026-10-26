@@ -105,7 +105,7 @@ fn filters_that_arent_shadows_or_blurs_are_left_out_and_reported() {
 }
 
 #[test]
-fn exported_effects_come_back_as_they_were() {
+fn exported_blurred_layers_reopen_as_images() {
     let mut d = Document::new("t");
     let p = d.first_page().unwrap();
     let r = d.create(p, NodeKind::Rectangle, "R", 20.0, 20.0, 60.0, 40.0).unwrap();
@@ -113,18 +113,20 @@ fn exported_effects_come_back_as_they_were() {
     let node = d.get_mut(r).unwrap();
     node.fills = vec![Paint::solid(Color::from_hex("336699").unwrap())];
     node.effects = vec![
-        Effect { kind: EffectKind::DropShadow(shadow.clone()), visible: true },
-        Effect { kind: EffectKind::LayerBlur(Blur { radius: 4.0, ..Blur::default() }), visible: true },
+        Effect { kind: EffectKind::DropShadow(shadow), visible: true },
+        Effect { kind: EffectKind::LayerBlur(Blur::uniform(4.0)), visible: true },
     ];
     let svg = crate::export_svg(&d, &[r], &crate::SvgOptions::default()).unwrap();
     let mut d2 = Document::new("back");
     let p2 = d2.first_page().unwrap();
     let f = crate::import_svg(&mut d2, svg.as_bytes(), p2, 0.0, 0.0, "x").unwrap();
-    let back = d2.subtree(f).into_iter().filter_map(|i| d2.node(i)).find(|n| n.kind == NodeKind::Rectangle).unwrap();
-    let [EffectKind::DropShadow(s), EffectKind::LayerBlur(b)] = &back.effects.iter().map(|e| e.kind.clone()).collect::<Vec<_>>()[..] else {
-        panic!("{:?}", back.effects)
-    };
-    assert_eq!((s.offset, s.radius, b.radius), (shadow.offset, shadow.radius, 4.0));
-    let c = s.color;
-    assert!((c.r - 0.1).abs() < 1e-3 && (c.g - 0.2).abs() < 1e-3 && (c.b - 0.3).abs() < 1e-3 && (c.a - 0.4).abs() < 1e-3, "{c:?}");
+    let back = d2
+        .subtree(f)
+        .into_iter()
+        .filter_map(|i| d2.node(i))
+        .find(|n| n.fills.iter().any(|p| matches!(p.kind, figcraft_color::PaintKind::Image(_))))
+        .unwrap();
+    assert!(back.effects.is_empty());
+    assert!(!d2.images.is_empty());
+    assert_eq!(d.node(r).unwrap().effects.len(), 2, "export keeps the editable document");
 }

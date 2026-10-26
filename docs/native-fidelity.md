@@ -1,6 +1,6 @@
 # Native fidelity: bounded controls
 
-2026-10-26, M6. This fork keeps the shared FigCraft document/command/renderer
+2026-10-26, M6/M7. This fork keeps the shared FigCraft document/command/renderer
 architecture. Changes are checked against original synthetic native outputs;
 successful imports, command counts and generated round trips are not visual parity.
 
@@ -84,18 +84,101 @@ A native topology control also had a face unpainted through
 `vector.edit.paint`, exported as `.fig`, reopened and painted back on. Its
 original pixels returned. The format regression separately verifies that an
 unused image fill retains its asset through the same export/reopen path.
-This checks the headless workflow, not the attached desktop, multiple agents,
-or the entire MCP command catalog.
+This checked the headless workflow at the M6 checkpoint. Attached desktop
+checks are recorded separately below; neither checks multiple agents or the
+entire MCP command catalog.
+
+## Uniform blur and zero-paint background activation
+
+The uniform layer/background filter now uses a separable, pixel-integrated
+triangular kernel with support equal to radius × device scale. Weighted prefix
+sums keep work linear at large radii. Premultiplied colour and alpha remain
+floating between the two passes and resolve to bytes once; no gamma, radius or
+sample phase was fitted to native images. Layer-blur export bounds use the same
+full-radius support: the native 256×128 radius12 control exports at 560×304
+at 2×; asking explicitly for the geometric box still crops it to 512×256.
+Shadows and glass retain their
+previous Gaussian approximation and are not covered by this filter change.
+
+The evidence replay expanded to 36 intact native carriers: 28 original PNG
+comparisons and eight import-only controls. Complete imported document JSON is
+byte-identical before/after. The renderer never reads the native PNGs.
+
+| Native control | Before maximum error /255 | After maximum error /255 |
+| --- | --- | --- |
+| Solid rectangle / flattened vector blur12, alpha | 21 | 2 |
+| Skewed vector blur12, alpha | 24 | 2 |
+| Coloured gradient / alpha seam / unclipped parent blur12, alpha | 21–22 | 2 |
+| Background blur12/24 with positive fill, encoded RGB | 16–22 | 2–3 |
+| Background blur24, zero-alpha solid fill, complete RGBA | 191 | 0 |
+
+These are residual measurements, not passing parity tolerances. All straight
+RGBA differences, including RGB under transparent pixels, are retained in the
+local report. Primitive AA, correlated edges/groups/masks and shadow residuals
+remain unchanged. The zero-paint correction is bounded to layers with explicit
+fully transparent paints and no children or visible stroke; arbitrary paint
+coverage masks and no-fill rectangles remain unaccepted. A fresh native
+no-fill vector control clears both paints and regions and already renders
+exactly; this does not establish the rectangle case. Its white 25% fill was
+restored through the UI, and the restored typed nodes exactly match the
+retained control. That fresh native PNG differs from the retained native PNG
+by up to two RGB levels (alpha identical); cause/build/seed attribution is
+unknown. The candidate still differs from the fresh PNG by up to three RGB
+levels. Neither native variation nor transparent RGB is discarded as a
+parity tolerance.
+
+Progressive blur still interpolates a few uniform levels. Its levels now use
+the same filter as uniform blur, preserving flat-ramp and endpoint consistency;
+no native progressive interpolation acceptance follows. Mathematical tests
+compare prefix sums with direct integrated convolution at fractional, large
+and near-zero support, including two-pass premultiplied colour. Tests that
+assumed Gaussian blur or monotonic contrast of periodic stripes were corrected:
+a triangular kernel has frequency zeros and lobes. Sharp-end tests now sample
+outside the ramp rather than a pixel centre already inside it.
+
+SVG has a different Gaussian blur primitive, so blurred layers use the existing
+whole-layer raster export path. An embedded PNG is checked byte-for-byte against
+the renderer including a shadow; the internal document remains editable, while
+the exported SVG blur is an image. Imported SVG Gaussian blur is an approximation
+in the native blur model. PDF already uses the renderer for these effects.
+
+## Actual desktop and attached MCP
+
+A fresh desktop build was launched on the user's actual Wayland session with
+isolated configuration/cache/data folders and confined automation roots. The
+headless and attached stdio MCP servers each opened nine retained/fresh native
+scenes, exported the same pixels as the direct renderer, saved/reopened editable
+`.figcraft` files, changed opacity, undid/redid it, and rolled back a failing
+batch. Attached Undo used the actual UI shortcut route. The blur control's full
+export is 560×304, with no fitted crop. Other controls explicitly request their
+retained geometric-box crops. Window captures were visually inspected.
+
+Separate authoring checks created a frame, rounded rectangle and text through
+MCP, replaced text, inspected geometry, hovered the pointer, saved/reopened and
+verified the PNG bytes. No image node replaced those editable layers. Together
+the checks exercised all 18 MCP tool entrypoints: 204 attached requests and 166
+headless requests. This is bounded protocol/workflow evidence, not acceptance
+of all commands, native fonts, concurrent agents, component libraries,
+interactive desktop controls or prototypes. The desktop was left displaying
+the restored native background-blur control.
 
 ## Validation
 
-`cargo +1.97.1 xtask ci` passed on the final tree: formatting, workspace clippy,
+At `40de825`, `cargo +1.97.1 xtask ci` passed: formatting, workspace clippy,
 3223 native unit/integration tests (eight ignored), doctests, English catalog
 coverage, layer boundaries, asset attribution, WASM and the plugin workspace.
 The first run caught the new import warning missing from the English catalog;
 that entry was added and the complete gate rerun. The optional craft-fonts
 checkout was absent; a preexisting unknown-clippy-lint warning remains on this
 toolchain. No native font fidelity or interactive performance acceptance follows.
+
+For the M7 filter/bounds tree, `cargo +1.97.1 xtask ci` also passed all of
+those gates, including WASM and plugin builds. Export regressions verify full
+blur support and the explicit geometric-box crop separately. The initial SVG
+check expected editable filter metadata after raster export; it now checks the
+document stays editable, the SVG reopens as an image and the embedded pixels
+equal the renderer. An intermediate CI process ended with SIGTERM (cause
+unidentified); the complete gate was rerun successfully after the bounds fix.
 
 ## Local evidence and limits
 
@@ -107,7 +190,17 @@ body is a committed asset or renderer input. The replay harness imports intact
 carriers; native PNGs are read only by the separate comparison step.
 
 This is a narrow import/export correction. General native antialiasing,
-floating composition, blur kernels, arbitrary region inference, real-world
-libraries, desktop interactions and full MCP parity remain unaccepted. The
+floating composition, general effects, arbitrary region inference, real-world
+libraries, complete desktop interactions and full MCP parity remain unaccepted. The
 native reader's treatment of FigCraft's metadata is not a guarantee that it
 will preserve that metadata after editing and re-saving there.
+
+The M7 uniform-blur evidence is separate, under gitignored
+`plan/figma/alpha-desktop-20261026/`: 63 frozen retained inputs, before/after
+whole documents, all residuals, native UI acquisitions, failed checks and
+actual MCP transcripts. Two additional fresh carriers/PNGs are retained, with
+their incumbent PNGs under `plan/figma/screenshots/alpha-desktop-20261026/`.
+The final replay imports all 38 carriers without warnings; the 36 retained
+document JSON files are byte-identical to their baselines. Primitive AA,
+correlated composition, shadows, progressive blur and prototype motion still
+need native corrections/acceptance. There is no 1:1 MVP acceptance from this arc.

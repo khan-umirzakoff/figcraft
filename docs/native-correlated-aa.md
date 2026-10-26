@@ -231,3 +231,74 @@ original failure remains retained; whole-window captures still require a native
 frame. See [native MCP wake](native-control-wake.md) for the exact patch, final
 binary, full gate, covered-window exit and platform limits. This changes no
 renderer or native AA metric and grants no MVP acceptance.
+
+## Identity groups and fresh native scale controls
+
+A subsequent whole-file native control retains 452 layers /32 pages and exports
+the same 1200×160 curved-composition frame at1x,2x and4x. No geometry is removed
+or projected. The complete typed ledgers differ only in the root export preset;
+restored typed documents equal the baseline exactly. Complete raw-message
+ledgers preserve the additional distinction that restoration leaves an empty
+export-settings array where the baseline omitted that field. No other raw
+field changes. The initial asynchronous2x save accidentally captured preset4x;
+that failed acquisition is retained and a corrected2x source was saved before
+further edits.
+
+The bounded renderer declined the4x scene. A generated regression reproduces
+the same class of failure:44 nested identity pass-through groups around a simple
+alpha mask exhaust the work allowance although they change no coverage. The
+compiler now folds only a single-child pass-through group with opacity1,
+Normal blending and no clip/mask. All editable document groups remain present.
+Sampling, floating resolve and all resource limits are unchanged. The regression
+fails before the correction and passes afterward; clipping, isolation, opacity,
+blend and mask tests remain intact.
+
+| Fresh native scale | Unpatched69 alpha max | Before identity folding | After identity folding |
+| --- | ---: | ---: | ---: |
+| 1x | 96 | 16 | 16 |
+| 2x | 96 | 17 | 17 |
+| 4x | 112 | 112 | 17 |
+
+At4x, differing alpha pixels fall682,910→226,428. There are still transparent-RGB
+and alpha differences; this table grants no error tolerance. All63 previous
+whole typed models and55 previous PNGs are byte-identical after folding.
+The new3-scale files also pass actual attached MCP edits, save/reopen,
+keyboard Undo/Redo and failed-batch rollback; commands preserve editable layers.
+
+### Historical PNGs do not establish current native equality
+
+The new native2x export is repeatable: a second ordinary Export PNG, Copy as PNG,
+and both Basic/Detailed image-resampling choices all produce exactly the same
+PNG bytes for this vector-only frame. They still differ from the historical
+native PNG. Native half-mask interiors now contain127 where the historical
+reference and candidate contain128; new curved boundaries retain larger errors.
+The old candidate and new candidate outputs at2x are themselves byte-identical.
+Thus the earlier curved-control max1 remains a measurement against that frozen
+historical artifact, not a claim about every current native export.
+
+Data-only source attribution checks all12 original vector-network blobs against
+the new whole file byte-for-byte. The10 newly present cached cubic paths have
+control points exactly equal to the original network arithmetic. Cached path
+presence, clipboard-versus-export choice and Basic/Detailed resampling therefore
+provide no verified explanation or correction. The generic raw decoder is
+self-checked against the previously independent24-node whole-message oracle;
+no independent decoder claim is made for the fresh whole native files.
+Native build/backend identity remains unknown. No vendor implementation body
+was read, and no reference-derived per-pixel adjustment was installed.
+
+Predeclared2×2 box resolves of the native4x/2x images also fail to reproduce the
+native2x/1x outputs, with alpha maxima28–32 across floor/nearest/ties-even rules.
+Those diagnostics are rejected. Evidence and retained failures stay local in
+`plan/figma/resolve-scale-20261026/`. Cubic AA, placement-sensitive1x cases,
+unsupported mixed scenes, font/library fidelity and the overall1:1 MVP remain
+open.
+
+Final folding verification passes the complete `cargo +1.97.1 xtask ci` gate,
+including WASM/plugins, and810 actual attached MCP requests:28 previous scenes,
+two independent cubic controls, three fresh scale controls and editable
+frame/rectangle/text authoring across the18 entry points. Another39 raw window
+calls verify exact inspector edit/Undo/Redo. The final desktop4x node capture
+matches the direct renderer's complete RGBA; the actual window capture was read.
+The local `validation-final.json` seals source/binary hashes, preserved inputs,
+full ledgers, gate and workflow receipts. These checks verify the implementation
+and transport; native pixel equality and MVP acceptance remain false.

@@ -53,6 +53,34 @@ fn solid_paint_stack_shares_one_geometric_coverage() {
     d.get_mut(id).unwrap().fills.push(Paint::solid(Color::WHITE));
     assert_eq!(single.data(), image(&d, f).data());
 }
+
+#[test]
+fn identity_group_nesting_keeps_a_simple_mask_within_the_work_budget() {
+    fn scene(depth: usize) -> (Document, NodeId) {
+        let (mut d, f) = doc();
+        let n = d.get_mut(f).unwrap();
+        n.width = 1024.;
+        n.height = 512.;
+        n.clip = true;
+        let mut parent = f;
+        for _ in 0..depth {
+            parent = d.create(parent, NodeKind::Group, "Pass through", 0., 0., 0., 0.).unwrap();
+        }
+        for mask in [true, false] {
+            let id = d.create(parent, NodeKind::Rectangle, "Shape", 16.25, 12.125, 880., 420.).unwrap();
+            let n = d.get_mut(id).unwrap();
+            n.is_mask = mask;
+            n.fills = vec![Paint::solid(Color::WHITE.with_alpha(if mask { 0.5 } else { 1. }))];
+        }
+        (d, f)
+    }
+    let under = Pixmap::new(1024, 512).unwrap();
+    let (flat, f) = scene(0);
+    let expected = render(&flat, &[(f, Affine::IDENTITY)], &under).unwrap();
+    let (nested, f) = scene(44);
+    let actual = render(&nested, &[(f, Affine::IDENTITY)], &under).unwrap();
+    assert_eq!(actual.data(), expected.data(), "identity groups must not change mask coverage or force the legacy renderer");
+}
 #[test]
 fn pass_through_blends_see_the_existing_nonuniform_backdrop() {
     let (mut d, f) = doc();

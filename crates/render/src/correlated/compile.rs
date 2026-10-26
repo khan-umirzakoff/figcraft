@@ -69,6 +69,10 @@ impl Compiler<'_> {
         self.entry(self.plan.geometries.get(geometry)?.bounds(), Content::Fill { geometry, color })
     }
     fn group(&mut self, children: Vec<usize>, opacity: f64, pass: bool, blend: Blend, clip: Option<usize>, mask: Option<usize>) -> Option<usize> {
+        // Identity wrappers otherwise spend the scene work budget on the same coverage again.
+        if opacity == 1. && pass && matches!(blend, Blend::Normal) && clip.is_none() && mask.is_none() && children.len() == 1 {
+            return children.first().copied();
+        }
         let mut bounds = children.iter().filter_map(|&id| self.plan.entries.get(id).map(|e| e.bounds)).reduce(union).unwrap_or([0.; 4]);
         for id in clip.iter().chain(&mask) {
             bounds = intersect(bounds, self.plan.entries.get(*id)?.bounds);

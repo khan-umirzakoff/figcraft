@@ -219,3 +219,15 @@ the app alive and idle. That failed receipt is retained. The earlier logic
 dispatch fix and successful 28-scene run do not prove that the native event loop
 wakes in every covered/idle-window state. This reliability issue remains open
 alongside cubic AA; it is not a successful attached check for these new files.
+
+
+## Native event-loop follow-up
+
+The attached idle-window failure above has a verified correction for state
+requests: the server now posts compositor-independent native logic events.
+Final visible checks pass both additional files, and the same files pass
+editing/export/Undo/Redo without drawing any UI frames after75s idle. The
+original failure remains retained; whole-window captures still require a native
+frame. See [native MCP wake](native-control-wake.md) for the exact patch, final
+binary, full gate, covered-window exit and platform limits. This changes no
+renderer or native AA metric and grants no MVP acceptance.

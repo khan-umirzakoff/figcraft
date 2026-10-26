@@ -17,7 +17,10 @@ reply:    {"id": 1, "ok": true, "result": ...}
 ```
 
 Requests are queued for the UI thread. State requests run during logic even when a compositor
-delays frames or does not report visibility. Window captures, raw input and new windows need a
+delays frames or does not report visibility. The native control waker posts a logic event directly
+to the event loop, independent of egui's coalesced redraw request and compositor callbacks.
+The pinned eframe patch is documented in `vendor/eframe/FIGCRAFT_PATCH.md`.
+Window captures, raw input and new windows need a
 drawn frame; known hidden windows reject those at once. A request that the UI doesn't answer within 60 s gets a timeout error. A line that is
 not JSON gets `{"id": null, "ok": false, "error": "bad JSON: …"}` and ends the connection (so an
 HTTP request a web page makes the browser send here never runs). The implementation is in
@@ -46,7 +49,8 @@ second while minimised, so a request there takes up to about 0.1 s. What only a 
 answer (`ui.screenshot`, `ui.input`, `window.new`) is an error at once (`window 0 is minimised or
 hidden: …`) instead of waiting for the window to show; `ui.render` draws the document without it.
 Under Wayland the app can't tell that its window is minimised: where the compositor then stops
-drawing it, a request waits for the window and gets the 60 s timeout error.
+drawing it, a frame-bound request waits for the window and gets the 60 s timeout error. State
+requests still run; the control waker does not focus the window or continuously poll it.
 
 Coordinates are page units, y down. `x`/`y` in `node.set`/`node.create` are relative to the parent
 frame (groups have no coordinate space of their own). JSON inspection preserves the stored

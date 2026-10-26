@@ -10,7 +10,8 @@ use figcraft_ui_egui::ControlRequest;
 use serde_json::{Value, json};
 
 type Queue = Arc<Mutex<Vec<ControlRequest>>>;
-type CtxSlot = Arc<Mutex<Option<egui::Context>>>;
+pub type Wake = Arc<dyn Fn() + Send + Sync>;
+pub type WakeSlot = Arc<Mutex<Option<Wake>>>;
 
 const MAX_LINE: usize = 32 * 1024 * 1024;
 const MAX_CONNECTIONS: usize = 8;
@@ -21,6 +22,15 @@ const TIMEOUT: Duration = Duration::from_secs(60);
 /// core busy until it recovers.
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 
+/// Wake requests that arrived before the native app's creation context was ready.
+pub fn install_waker(queue: &Queue, slot: &WakeSlot, wake: Option<Wake>) {
+    *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = wake.clone();
+    let pending = !queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_empty();
+    if pending && let Some(wake) = wake {
+        wake();
+    }
+}
+
 /// Deferred requests for a hidden window must not make the UI's queue grow without a bound.
 pub fn drain_queue(queue: &Queue, target: &mut Vec<ControlRequest>) {
     target.retain(|request| !request.is_cancelled());
@@ -30,7 +40,7 @@ pub fn drain_queue(queue: &Queue, target: &mut Vec<ControlRequest>) {
     target.extend(queue.drain(..count));
 }
 
-pub fn start(port: u16, queue: Queue, ctx: CtxSlot) {
+pub fn start(port: u16, queue: Queue, wake: WakeSlot) {
     let listener = match TcpListener::bind(("127.0.0.1", port)) {
         Ok(l) => l,
         Err(e) => {
@@ -43,7 +53,7 @@ pub fn start(port: u16, queue: Queue, ctx: CtxSlot) {
     let spawned = std::thread::Builder::new().name("figcraft-control".into()).spawn(move || {
         let mut workers = Vec::new();
         for stream in accepted(listener.incoming(), || std::thread::sleep(ACCEPT_RETRY)) {
-            spawn_connection(stream, queue.clone(), ctx.clone(), &mut workers, TIMEOUT);
+            spawn_connection(stream, queue.clone(), wake.clone(), &mut workers, TIMEOUT);
         }
     });
     if let Err(e) = spawned {
@@ -56,20 +66,20 @@ fn accepted<T>(incoming: impl Iterator<Item = std::io::Result<T>>, mut wait: imp
     incoming.filter_map(move |stream| stream.map_err(|_| wait()).ok())
 }
 
-fn spawn_connection(stream: TcpStream, queue: Queue, ctx: CtxSlot, workers: &mut Vec<std::thread::JoinHandle<()>>, timeout: Duration) {
+fn spawn_connection(stream: TcpStream, queue: Queue, wake: WakeSlot, workers: &mut Vec<std::thread::JoinHandle<()>>, timeout: Duration) {
     workers.retain(|worker| !worker.is_finished());
     if workers.len() >= MAX_CONNECTIONS {
         return;
     }
     match std::thread::Builder::new().name("figcraft-control-conn".into()).spawn(move || {
-        let _ = serve(stream, queue, ctx, timeout);
+        let _ = serve(stream, queue, wake, timeout);
     }) {
         Ok(worker) => workers.push(worker),
         Err(e) => log::error!("control connection thread: {e}"),
     }
 }
 
-fn serve(mut out: TcpStream, queue: Queue, ctx: CtxSlot, timeout: Duration) -> std::io::Result<()> {
+fn serve(mut out: TcpStream, queue: Queue, wake: WakeSlot, timeout: Duration) -> std::io::Result<()> {
     out.set_read_timeout(Some(timeout))?;
     out.set_write_timeout(Some(timeout))?;
     let mut reader = BufReader::new(out.try_clone()?);
@@ -106,8 +116,9 @@ fn serve(mut out: TcpStream, queue: Queue, ctx: CtxSlot, timeout: Duration) -> s
                 }
                 pending.push(ControlRequest { id: id.clone(), method, params, reply: tx, cancelled: cancelled.clone() });
                 drop(pending);
-                if let Some(c) = ctx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
-                    c.request_repaint();
+                let wake = wake.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+                if let Some(wake) = wake {
+                    wake();
                 }
                 match rx.recv_timeout(timeout) {
                     Ok(r) => match r.result {

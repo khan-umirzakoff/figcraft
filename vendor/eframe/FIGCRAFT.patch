@@ -1,0 +1,255 @@
+--- a/src/epi.rs
++++ b/src/epi.rs
+@@ -1,3 +1,4 @@
++// FigCraft native logic-wake/asset-policy modification (2026-10-26); see FIGCRAFT_PATCH.md.
+ //! Platform-agnostic interface for writing apps using [`egui`] (epi = egui programming interface).
+ //!
+ //! `epi` provides interfaces for window management and serialization.
+@@ -86,6 +87,9 @@
+     /// The root [`winit::window::Window`].
+     #[cfg(not(target_arch = "wasm32"))]
+     pub(crate) window: Option<std::sync::Arc<winit::window::Window>>,
++
++    #[cfg(not(target_arch = "wasm32"))]
++    pub(crate) logic_waker: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
+ 
+     /// Raw platform window handle
+     #[cfg(not(target_arch = "wasm32"))]
+@@ -131,10 +135,20 @@
+             #[cfg(not(target_arch = "wasm32"))]
+             window: None,
+             #[cfg(not(target_arch = "wasm32"))]
++            logic_waker: None,
++            #[cfg(not(target_arch = "wasm32"))]
+             raw_window_handle: Err(HandleError::NotSupported),
+             #[cfg(not(target_arch = "wasm32"))]
+             raw_display_handle: Err(HandleError::NotSupported),
+         }
++    }
++
++    /// Wake native root app logic without waiting for a compositor frame.
++    ///
++    /// This does not draw UI. The waker can be called from another thread.
++    #[cfg(not(target_arch = "wasm32"))]
++    pub fn native_logic_waker(&self) -> Option<std::sync::Arc<dyn Fn() + Send + Sync>> {
++        self.logic_waker.clone()
+     }
+ 
+     /// Access to the root [`winit::window::Window`].
+--- a/src/native/winit_integration.rs
++++ b/src/native/winit_integration.rs
+@@ -1,3 +1,4 @@
++// FigCraft native logic-wake/asset-policy modification (2026-10-26); see FIGCRAFT_PATCH.md.
+ use std::{sync::Arc, time::Instant};
+ 
+ use winit::{
+@@ -62,6 +63,8 @@
+ /// The custom even `eframe` uses with the [`winit`] event loop.
+ #[derive(Debug)]
+ pub enum UserEvent {
++    /// Run root app logic without waiting for a redraw or changing window focus.
++    RunLogic,
+     /// A repaint is requested.
+     RequestRepaint {
+         /// What to repaint.
+@@ -101,6 +104,7 @@
+         &mut self,
+         event_loop: &ActiveEventLoop,
+         window_id: WindowId,
++        logic_only: bool,
+     ) -> crate::Result<EventResult>;
+ 
+     fn suspended(&mut self, event_loop: &ActiveEventLoop) -> crate::Result<EventResult>;
+--- a/src/native/run.rs
++++ b/src/native/run.rs
+@@ -1,3 +1,4 @@
++// FigCraft native logic-wake/asset-policy modification (2026-10-26); see FIGCRAFT_PATCH.md.
+ use core::time::Duration;
+ use std::time::Instant;
+ 
+@@ -114,7 +115,7 @@
+                 .insert(window_id, Instant::now());
+ 
+             // Fix flickering on Windows, see https://github.com/emilk/egui/pull/2280
+-            event_result = self.winit_app.run_ui_and_paint(event_loop, window_id);
++            event_result = self.winit_app.run_ui_and_paint(event_loop, window_id, false);
+         }
+ 
+         let combined_result = event_result.map(|event_result| match event_result {
+@@ -225,7 +226,7 @@
+         // RedrawRequested events on Windows. This ensures that viewport
+         // commands like Visible(true) are still processed.
+         for window_id in &invisible_window_ids {
+-            let event_result = self.winit_app.run_ui_and_paint(event_loop, *window_id);
++            let event_result = self.winit_app.run_ui_and_paint(event_loop, *window_id, false);
+             self.handle_event_result(event_loop, event_result);
+         }
+ 
+@@ -301,6 +302,7 @@
+ 
+     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
+         profiling::function_scope!(match &event {
++            UserEvent::RunLogic => "UserEvent::RunLogic",
+             UserEvent::RequestRepaint { .. } => "UserEvent::RequestRepaint",
+             #[cfg(feature = "accesskit")]
+             UserEvent::AccessKitActionRequest(_) => "UserEvent::AccessKitActionRequest",
+@@ -308,6 +310,16 @@
+ 
+         event_loop_context::with_event_loop_context(event_loop, move || {
+             let event_result = match event {
++                UserEvent::RunLogic => {
++                    if let Some(window_id) = self
++                        .winit_app
++                        .window_id_from_viewport_id(egui::ViewportId::ROOT)
++                    {
++                        self.winit_app.run_ui_and_paint(event_loop, window_id, true)
++                    } else {
++                        Ok(EventResult::Wait)
++                    }
++                }
+                 UserEvent::RequestRepaint {
+                     when,
+                     cumulative_pass_nr,
+@@ -372,7 +384,7 @@
+         event_loop_context::with_event_loop_context(event_loop, move || {
+             let event_result = match event {
+                 winit::event::WindowEvent::RedrawRequested => {
+-                    self.winit_app.run_ui_and_paint(event_loop, window_id)
++                    self.winit_app.run_ui_and_paint(event_loop, window_id, false)
+                 }
+                 _ => self.winit_app.window_event(event_loop, window_id, event),
+             };
+--- a/src/native/wgpu_integration.rs
++++ b/src/native/wgpu_integration.rs
+@@ -1,3 +1,4 @@
++// FigCraft native logic-wake/asset-policy modification (2026-10-26); see FIGCRAFT_PATCH.md.
+ //! Note that this file contains code very similar to [`super::glow_integration`].
+ //! When making changes to one you often also want to apply it to the other.
+ //!
+@@ -315,6 +316,7 @@
+ 
+         crate::maybe_attach_inspection_plugin(&egui_ctx, Some(self.app_name.clone()));
+ 
++        let logic_proxy = Arc::clone(&self.repaint_proxy);
+         let cc = CreationContext {
+             egui_ctx: egui_ctx.clone(),
+             integration_info: integration.frame.info().clone(),
+@@ -325,6 +327,12 @@
+             get_proc_address: None,
+             wgpu_render_state,
+             window: Some(Arc::clone(&window)),
++            logic_waker: Some(Arc::new(move || {
++                // A following logic tick observes native viewport commands such as Close.
++                for _ in 0..2 {
++                    let _ = logic_proxy.lock().send_event(UserEvent::RunLogic);
++                }
++            })),
+             raw_display_handle: window.display_handle().map(|h| h.as_raw()),
+             raw_window_handle: window.window_handle().map(|h| h.as_raw()),
+         };
+@@ -432,11 +440,12 @@
+         &mut self,
+         event_loop: &ActiveEventLoop,
+         window_id: WindowId,
++        logic_only: bool,
+     ) -> Result<EventResult> {
+         self.initialized_all_windows(event_loop);
+ 
+         if let Some(running) = &mut self.running {
+-            running.run_ui_and_paint(window_id, event_loop)
++            running.run_ui_and_paint(window_id, event_loop, logic_only)
+         } else {
+             Ok(EventResult::Wait)
+         }
+@@ -600,6 +609,7 @@
+         &mut self,
+         window_id: WindowId,
+         event_loop: &ActiveEventLoop,
++        logic_only: bool,
+     ) -> Result<EventResult> {
+         profiling::function_scope!();
+ 
+@@ -681,7 +691,8 @@
+             };
+             let mut raw_input = egui_winit.take_egui_input(window);
+ 
+-            let show_ui = is_visible || is_viewport_or_descendant_visible(viewports, viewport_id);
++            let show_ui = !logic_only
++                && (is_visible || is_viewport_or_descendant_visible(viewports, viewport_id));
+ 
+             integration.pre_update();
+ 
+--- a/src/native/glow_integration.rs
++++ b/src/native/glow_integration.rs
+@@ -1,3 +1,4 @@
++// FigCraft native logic-wake/asset-policy modification (2026-10-26); see FIGCRAFT_PATCH.md.
+ //! Note that this file contains code very similar to [`super::wgpu_integration`].
+ //! When making changes to one you often also want to apply it to the other.
+ //!
+@@ -351,6 +352,7 @@
+             let gl_config = glutin.gl_config.clone();
+             let get_proc_address = move |addr: &_| gl_config.display().get_proc_address(addr);
+             let window = glutin.window(ViewportId::ROOT);
++            let logic_proxy = Arc::clone(&self.repaint_proxy);
+             let cc = CreationContext {
+                 egui_ctx: integration.egui_ctx.clone(),
+                 integration_info: integration.frame.info().clone(),
+@@ -360,6 +362,12 @@
+                 #[cfg(feature = "wgpu_no_default_features")]
+                 wgpu_render_state: None,
+                 window: Some(Arc::clone(&window)),
++                logic_waker: Some(Arc::new(move || {
++                    // A following logic tick observes native viewport commands such as Close.
++                    for _ in 0..2 {
++                        let _ = logic_proxy.lock().send_event(UserEvent::RunLogic);
++                    }
++                })),
+                 raw_display_handle: window.display_handle().map(|h| h.as_raw()),
+                 raw_window_handle: window.window_handle().map(|h| h.as_raw()),
+             };
+@@ -458,9 +466,10 @@
+         &mut self,
+         event_loop: &ActiveEventLoop,
+         window_id: WindowId,
++        logic_only: bool,
+     ) -> Result<EventResult> {
+         if let Some(running) = &mut self.running {
+-            running.run_ui_and_paint(event_loop, window_id)
++            running.run_ui_and_paint(event_loop, window_id, logic_only)
+         } else {
+             Ok(EventResult::Wait)
+         }
+@@ -567,6 +576,7 @@
+         &mut self,
+         event_loop: &ActiveEventLoop,
+         window_id: WindowId,
++        logic_only: bool,
+     ) -> Result<EventResult> {
+         profiling::function_scope!();
+ 
+@@ -621,7 +631,7 @@
+             let viewport_ui_cb = viewport.viewport_ui_cb.clone();
+ 
+             let show_ui =
+-                is_visible || is_viewport_or_descendant_visible(&glutin.viewports, viewport_id);
++                !logic_only && (is_visible || is_viewport_or_descendant_visible(&glutin.viewports, viewport_id));
+ 
+             self.integration.pre_update();
+ 
+--- a/src/native/epi_integration.rs
++++ b/src/native/epi_integration.rs
+@@ -1,3 +1,4 @@
++// FigCraft native logic-wake/asset-policy modification (2026-10-26); see FIGCRAFT_PATCH.md.
+ //! Common tools used by [`super::glow_integration`] and [`super::wgpu_integration`].
+ 
+ use web_time::Instant;
+@@ -436,8 +437,7 @@
+ 
+ fn load_default_egui_icon() -> egui::IconData {
+     profiling::function_scope!();
+-    #[expect(clippy::unwrap_used)]
+-    crate::icon_data::from_png_bytes(&include_bytes!("../../data/icon.png")[..]).unwrap()
++    egui::IconData::default()
+ }
+ 
+ #[cfg(feature = "persistence")]

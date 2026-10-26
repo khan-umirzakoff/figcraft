@@ -18,8 +18,62 @@ fn queue() -> Queue {
     Arc::new(Mutex::new(Vec::new()))
 }
 
-fn context() -> CtxSlot {
+fn context() -> WakeSlot {
     Arc::new(Mutex::new(None))
+}
+
+#[test]
+fn every_request_wakes_logic_while_a_repaint_is_already_pending() {
+    let ctx = egui::Context::default();
+    let (paint_tx, paint_rx) = mpsc::channel();
+    ctx.set_request_repaint_callback(move |_| paint_tx.send(()).unwrap());
+    ctx.request_repaint();
+    paint_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    ctx.request_repaint();
+    assert!(paint_rx.try_recv().is_err(), "egui coalesces a pending repaint");
+
+    let (mut client, server) = pair();
+    let pending = queue();
+    let q = pending.clone();
+    let (wake_tx, wake_rx) = mpsc::channel();
+    let wake: WakeSlot = Arc::new(Mutex::new(Some(Arc::new(move || wake_tx.send(()).unwrap()))));
+    let worker = std::thread::spawn(move || serve(server, q, wake, Duration::from_secs(5)));
+    let mut reader = BufReader::new(client.try_clone().unwrap());
+    for id in 1..=3 {
+        writeln!(client, "{}", json!({"id": id, "method": "ui.inspect"})).unwrap();
+        wake_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let request = pending.lock().unwrap().pop().unwrap();
+        assert_eq!(request.id, id);
+        request.reply.send(figcraft_ui_egui::ControlReply { id: request.id, result: Ok(json!({})) }).unwrap();
+        assert_eq!(reply(&mut reader)["id"], id);
+    }
+    assert!(paint_rx.try_recv().is_err(), "no frame was needed to wake each state request");
+    client.shutdown(Shutdown::Write).unwrap();
+    worker.join().unwrap().unwrap();
+}
+
+#[test]
+fn installing_the_native_waker_serves_requests_already_queued_at_startup() {
+    let (mut client, server) = pair();
+    let pending = queue();
+    let q = pending.clone();
+    let slot = context();
+    let slot_in_worker = slot.clone();
+    let worker = std::thread::spawn(move || serve(server, q, slot_in_worker, Duration::from_secs(5)));
+    writeln!(client, "{}", json!({"id": 1, "method": "ui.inspect"})).unwrap();
+    let start = Instant::now();
+    while pending.lock().unwrap().is_empty() {
+        assert!(start.elapsed() < Duration::from_secs(5));
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let (tx, rx) = mpsc::channel();
+    install_waker(&pending, &slot, Some(Arc::new(move || tx.send(()).unwrap())));
+    rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let request = pending.lock().unwrap().pop().unwrap();
+    request.reply.send(figcraft_ui_egui::ControlReply { id: request.id, result: Ok(json!({})) }).unwrap();
+    assert_eq!(reply(&mut BufReader::new(client.try_clone().unwrap()))["id"], 1);
+    client.shutdown(Shutdown::Write).unwrap();
+    worker.join().unwrap().unwrap();
 }
 
 fn reply(reader: &mut BufReader<TcpStream>) -> Value {

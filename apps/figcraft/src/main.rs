@@ -208,8 +208,9 @@ fn main() -> eframe::Result {
         figcraft_ui_egui::live::open_invite(&mut fig, link);
     }
     let queue: Arc<Mutex<Vec<ControlRequest>>> = Arc::new(Mutex::new(Vec::new()));
+    let control_wake: control_server::WakeSlot = Arc::new(Mutex::new(None));
     if let Some(p) = port {
-        control_server::start(p, queue.clone(), ctx_slot.clone());
+        control_server::start(p, queue.clone(), control_wake.clone());
     }
     let icon = services::window_icon();
     // The app id is the Wayland app_id and the X11 window class on Linux: the desktop entry's name
@@ -244,14 +245,15 @@ fn main() -> eframe::Result {
     let result = eframe::run_native(
         "FigCraft",
         options,
-        Box::new(move |_cc| {
+        Box::new(move |cc| {
+            control_server::install_waker(&queue, &control_wake, cc.native_logic_waker());
             Ok(Box::new(App {
                 queue,
                 ctx_slot,
                 title: String::new(),
                 recovery,
                 #[cfg(target_os = "macos")]
-                apple_events: apple_events.connect(&_cc.egui_ctx),
+                apple_events: apple_events.connect(&cc.egui_ctx),
             }))
         }),
     );

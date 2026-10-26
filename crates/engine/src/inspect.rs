@@ -16,16 +16,16 @@ pub fn node_json(doc: &Document, id: NodeId, depth: usize) -> Value {
     });
     let Some(o) = v.as_object_mut() else { return v };
     if !n.is_page() {
-        o.insert("x".into(), json!(round(c[4])));
-        o.insert("y".into(), json!(round(c[5])));
-        o.insert("width".into(), json!(round(n.width)));
-        o.insert("height".into(), json!(round(n.height)));
+        o.insert("x".into(), json!(c[4]));
+        o.insert("y".into(), json!(c[5]));
+        o.insert("width".into(), json!(n.width));
+        o.insert("height".into(), json!(n.height));
         let rot = figcraft_geom::rotation_degrees(n.transform);
         if rot.abs() > 1e-6 {
-            o.insert("rotation".into(), json!(round(rot)));
+            o.insert("rotation".into(), json!(figcraft_geom::round_to(rot, 2)));
         }
         if let Some(b) = doc.world_bounds(id) {
-            o.insert("absoluteBounds".into(), json!({"x": round(b.x0), "y": round(b.y0), "width": round(b.width()), "height": round(b.height())}));
+            o.insert("absoluteBounds".into(), json!({"x": b.x0, "y": b.y0, "width": b.width(), "height": b.height()}));
         }
         if !n.visible {
             o.insert("visible".into(), json!(false));
@@ -281,10 +281,6 @@ pub fn node_json(doc: &Document, id: NodeId, depth: usize) -> Value {
         }
     }
     v
-}
-
-fn round(v: f64) -> f64 {
-    figcraft_geom::round_to(v, 2)
 }
 
 fn paints(p: &[figcraft_color::Paint]) -> Value {

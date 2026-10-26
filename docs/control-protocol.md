@@ -16,8 +16,9 @@ reply:    {"id": 1, "ok": true, "result": ...}
           {"id": 1, "ok": false, "error": "message"}
 ```
 
-Requests are queued and run on the UI thread at the start of the next frame, so replies reflect the
-real UI state. A request that the UI doesn't answer within 60 s gets a timeout error. A line that is
+Requests are queued for the UI thread. State requests run during logic even when a compositor
+delays frames or does not report visibility. Window captures, raw input and new windows need a
+drawn frame; known hidden windows reject those at once. A request that the UI doesn't answer within 60 s gets a timeout error. A line that is
 not JSON gets `{"id": null, "ok": false, "error": "bad JSON: …"}` and ends the connection (so an
 HTTP request a web page makes the browser send here never runs). The implementation is in
 `crates/ui-egui/src/control.rs` (methods) and `apps/figcraft/src/control_server.rs` (socket).
@@ -48,7 +49,9 @@ Under Wayland the app can't tell that its window is minimised: where the composi
 drawing it, a request waits for the window and gets the 60 s timeout error.
 
 Coordinates are page units, y down. `x`/`y` in `node.set`/`node.create` are relative to the parent
-frame (groups have no coordinate space of their own).
+frame (groups have no coordinate space of their own). JSON inspection preserves the stored
+precision of positions, sizes and absolute bounds; the inspector panel's display rounding does
+not apply to these API numbers. Rotation retains its existing two-decimal representation.
 
 **Windows.** The desktop app can show files in several windows (`window.new`). Every method takes
 an optional `window` (an id from `window.list`; `0` is the main window) and then runs in that

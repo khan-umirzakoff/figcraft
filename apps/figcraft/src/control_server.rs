@@ -1,5 +1,5 @@
 //! Localhost JSON-lines control server: each line `{"id", "method", "params"}` is queued for the UI
-//! thread; the reply line `{"id", "ok", "result" | "error"}` is written when the frame handled it.
+//! thread; the reply line `{"id", "ok", "result" | "error"}` is written when UI logic or a frame handled it.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};

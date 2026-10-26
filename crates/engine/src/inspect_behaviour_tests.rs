@@ -336,6 +336,25 @@ fn inspected_json_reports_the_layer() {
 }
 
 #[test]
+fn inspected_subpixel_geometry_survives_read_modify_write_in_a_group() {
+    let mut s = Session::new();
+    let a = rect(&mut s, 0.03125, 0.4375, 63.1875, 21.0625, None);
+    let b = rect(&mut s, 80.0, 10.0, 10.0, 10.0, None);
+    ex(&mut s, "object.group", json!({"ids": [a, b]}));
+    let before = s.doc().unwrap().get(a).unwrap().clone();
+    let n = ex(&mut s, "node.get", json!({"id": a}));
+    assert_eq!(n["x"], 0.03125);
+    assert_eq!(n["y"], 0.4375);
+    assert_eq!(n["width"], 63.1875);
+    assert_eq!(n["height"], 21.0625);
+    assert_eq!(n["absoluteBounds"], json!({"x": 0.03125, "y": 0.4375, "width": 63.1875, "height": 21.0625}));
+    set(&mut s, &[a], json!({"x": n["x"], "y": n["y"], "width": n["width"], "height": n["height"]}));
+    let after = s.doc().unwrap().get(a).unwrap();
+    assert_eq!(after.transform, before.transform);
+    assert_eq!((after.width, after.height), (before.width, before.height));
+}
+
+#[test]
 fn rem_conversion_leaves_names_alone() {
     let f = crate::codegen::px_to_rem;
     // Lengths convert, names ending in "px" don't.

@@ -1,6 +1,6 @@
 //! The control channel's UI-thread side. The app crate accepts JSON lines on a localhost socket
-//! and queues [`ControlRequest`]s; [`drain`] runs them at the start of a frame so replies reflect
-//! the real UI. Methods:
+//! and queues [`ControlRequest`]s; [`drain_logic`] answers state requests and [`drain`] handles
+//! requests that need a drawn frame. Methods:
 //!
 //! - `engine.execute {command, params}` — run any command (no dialogs open)
 //! - `engine.commands {}` — every command with its params doc
@@ -150,14 +150,9 @@ fn hidden(ctx: &Context, id: u64) -> bool {
     ctx.input(|i| i.raw.viewports.get(&crate::windows::viewport(id)).and_then(egui::ViewportInfo::visible)) == Some(false)
 }
 
-/// A hidden window (minimised, or covered by other windows) draws no frames, but the desktop app's
-/// `logic` still runs, for the main window even while every window is hidden: it answers the
-/// requests for any hidden window, in that window's file, so an attached agent can edit, inspect,
-/// type and save while the app is out of sight. What needs a frame ([`NEEDS_FRAME`]) is an error at
-/// once instead of waiting for the window to show. A request for a window on screen waits for its
-/// frame; another window on screen is asked to draw, which the main window's frame would do but
-/// doesn't while it is hidden. A request for a window that doesn't exist is an error at once.
-pub fn drain_hidden(app: &mut FigApp, ctx: &Context) {
+/// State requests run in logic, even when visibility is unknown or a compositor delays frames.
+/// Only captures/raw input/new windows need a drawn frame; known hidden windows reject those.
+pub fn drain_logic(app: &mut FigApp, ctx: &Context) {
     for r in std::mem::take(&mut app.control_queue) {
         if r.is_cancelled() {
             continue;
@@ -167,19 +162,15 @@ pub fn drain_hidden(app: &mut FigApp, ctx: &Context) {
             let _ = r.reply.send(ControlReply { id: r.id, result: Err(format!("no window {target}")) });
             continue;
         }
-        if !hidden(ctx, target) {
-            // Another window on screen draws only when asked: while the main window is hidden no
-            // frame of it does that (`drain`), so ask here.
-            if target != app.windows.current {
-                ctx.request_repaint_of(crate::windows::viewport(target));
-            }
-            app.control_queue.push(r);
-            continue;
-        }
         if NEEDS_FRAME.contains(&r.method.as_str()) {
-            let error =
-                format!("window {target} is minimised or hidden: `{}` needs it on screen (`ui.render` draws the document without it)", r.method);
-            let _ = r.reply.send(ControlReply { id: r.id, result: Err(error) });
+            if !hidden(ctx, target) {
+                ctx.request_repaint_of(crate::windows::viewport(target));
+                app.control_queue.push(r);
+            } else {
+                let error =
+                    format!("window {target} is minimised or hidden: `{}` needs it on screen (`ui.render` draws the document without it)", r.method);
+                let _ = r.reply.send(ControlReply { id: r.id, result: Err(error) });
+            }
             continue;
         }
         // Outside a frame, so outside the frame's guard: within the window's swap, a panic still
@@ -190,6 +181,7 @@ pub fn drain_hidden(app: &mut FigApp, ctx: &Context) {
             res
         });
         let _ = r.reply.send(ControlReply { id: r.id, result: res.unwrap_or_else(|| Err(format!("no window {target}"))) });
+        ctx.request_repaint_of(crate::windows::viewport(target));
     }
 }
 

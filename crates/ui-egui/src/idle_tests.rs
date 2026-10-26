@@ -359,7 +359,7 @@ fn a_hidden_window_answers_at_once() {
     let mut hidden = RawInput::default();
     hidden.viewports.insert(ViewportId::ROOT, egui::ViewportInfo { minimized: Some(true), ..Default::default() });
     let app = &mut h.app;
-    let _ = h.ctx.run_logic(&hidden, |ctx| crate::control::drain_hidden(app, ctx));
+    let _ = h.ctx.run_logic(&hidden, |ctx| crate::control::drain_logic(app, ctx));
     let saved = rx.try_recv().unwrap();
     assert_eq!(saved.id, json!(1));
     assert!(saved.result.is_ok() && path.exists(), "saved while hidden: {:?}", saved.result);
@@ -371,6 +371,27 @@ fn a_hidden_window_answers_at_once() {
     assert!(shot.result.unwrap_err().contains("minimised or hidden"), "a capture needs the window on screen");
     assert!(h.app.control_queue.is_empty(), "nothing waits for the window");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn control_undo_and_inspection_do_not_wait_for_an_unknown_visibility_frame() {
+    let (mut h, text) = document();
+    h.settle();
+    h.run("node.set", json!({"id": text, "opacity": 0.5}));
+    let (tx, rx) = std::sync::mpsc::channel();
+    for (id, method, params) in
+        [(1, "ui.key", json!({"key": "z", "cmd": true})), (2, "node.get", json!({"id": text})), (3, "ui.screenshot", json!({}))]
+    {
+        h.app.control_queue.push(ControlRequest { id: json!(id), method: method.into(), params, reply: tx.clone(), cancelled: Default::default() });
+    }
+    let app = &mut h.app;
+    // A compositor can stop frame callbacks without marking the viewport hidden.
+    let _ = h.ctx.run_logic(&RawInput::default(), |ctx| crate::control::drain_logic(app, ctx));
+    assert!(rx.try_recv().unwrap().result.is_ok());
+    let node = rx.try_recv().unwrap().result.unwrap();
+    assert_eq!(node.get("opacity").and_then(Value::as_f64).unwrap_or(1.), 1.);
+    assert_eq!(h.app.control_queue.len(), 1);
+    assert_eq!(h.app.control_queue[0].method, "ui.screenshot", "only the capture needs a frame");
 }
 
 #[test]

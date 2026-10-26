@@ -8,6 +8,7 @@
 pub mod backdrop;
 pub mod blur;
 pub mod boolean;
+mod correlated;
 pub mod draw;
 mod export_depth;
 pub mod fx;
@@ -186,6 +187,12 @@ pub fn render_view_single(doc: &Document, page: NodeId, view: &View, opts: &Opti
     };
     let xf = view.transform();
     let Some(p) = doc.node(page) else { return Some(pix) };
+    if !lod && !opts.outline_mode && opts.outlined.is_empty() && opts.skip.is_empty() && opts.solo.is_none() && p.children.len() <= 16_384 {
+        let roots: Vec<_> = p.children.iter().map(|&id| (id, xf)).collect();
+        if let Some(scene) = correlated::render(doc, &roots, &pix) {
+            return Some(scene);
+        }
+    }
     match opts.solo.filter(|id| *id != page && doc.page_of(*id) == Some(page)) {
         Some(id) => draw::draw_node(&ctx, &mut pix, id, xf * parent_transform(doc, id), 0),
         None => {
@@ -204,6 +211,13 @@ pub fn render_nodes_into(doc: &Document, ids: &[NodeId], view: &View, pix: &mut 
 
 /// [`render_nodes_into`] `time` seconds into animated GIFs.
 fn nodes_into(doc: &Document, ids: &[NodeId], view: &View, pix: &mut Pixmap, time: f64) {
+    if ids.len() <= 16_384 {
+        let roots: Vec<_> = ids.iter().map(|&id| (id, view.transform() * parent_transform(doc, id))).collect();
+        if let Some(scene) = correlated::render(doc, &roots, pix) {
+            *pix = scene;
+            return;
+        }
+    }
     let bounds = draw::Bounds::default();
     let ctx = draw::Ctx {
         doc,

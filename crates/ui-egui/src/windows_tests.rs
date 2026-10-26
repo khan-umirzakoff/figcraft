@@ -38,7 +38,7 @@ fn logic(ctx: &egui::Context, app: &mut FigApp, hidden: &[ViewportId]) {
     for id in std::iter::once(ViewportId::ROOT).chain(app.windows.list.iter().map(|w| crate::windows::viewport(w.id))) {
         input.viewports.insert(id, ViewportInfo { minimized: Some(false), occluded: Some(hidden.contains(&id)), ..Default::default() });
     }
-    let _ = ctx.run_logic(&input, |ctx| crate::control::drain_hidden(app, ctx));
+    let _ = ctx.run_logic(&input, |ctx| crate::control::drain_logic(app, ctx));
 }
 
 fn names(app: &FigApp) -> Vec<String> {
@@ -163,11 +163,13 @@ fn a_request_for_a_window_on_screen_wakes_it_while_the_main_window_is_hidden() {
     let log = woken.clone();
     ctx.set_request_repaint_callback(move |info| log.lock().unwrap().push(info.viewport_id));
 
-    // Only the main window's logic runs while it is hidden: the request for the other window,
-    // which is on screen, waits for that window's frame, and that window is asked to draw it.
+    // State queries do not wait for another window's compositor callback.
     let ui = request(&mut app, "ui.inspect", json!({"window": w}));
     logic(&ctx, &mut app, &[ViewportId::ROOT]);
-    assert!(ui.try_recv().is_err(), "answered in the other window's frame");
+    assert!(ui.try_recv().expect("answered during logic").result.is_ok());
+    let input = request(&mut app, "ui.input", json!({"window": w, "events": []}));
+    logic(&ctx, &mut app, &[ViewportId::ROOT]);
+    assert!(input.try_recv().is_err(), "raw input still needs the other window's frame");
     assert!(woken.lock().unwrap().contains(&other), "the other window is asked to draw: {:?}", woken.lock().unwrap());
 }
 

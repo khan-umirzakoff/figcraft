@@ -210,3 +210,11 @@ need native corrections/acceptance. There is no 1:1 MVP acceptance from this arc
 The subsequent [native shadow controls and correction](native-shadows.md)
 separate geometric caster/body/knockout, reduce the rectangular shadow errors
 and retain unresolved curve residuals. They do not change the MVP status.
+
+## Correlated solid scenes
+
+The following M7 arc keeps sample correlation through solid paint stacks, groups,
+alpha masks and clips in the shared renderer. Two native full-RGBA controls now
+match; curved group/mask alpha max96→1. Cubic-grid max16 and 1x direction/context
+max32 remain. See [correlated AA](native-correlated-aa.md) for original/fresh
+whole-source comparisons, the bounded fallback profile and remaining failures.

@@ -32,7 +32,7 @@ pub fn silhouette(doc: &Document, n: &Node) -> Option<Vec<Outline>> {
     outlines(doc, n, active)
 }
 
-fn active(p: &figcraft_color::Paint) -> bool {
+pub(crate) fn active(p: &figcraft_color::Paint) -> bool {
     p.visible
         && p.opacity > 0.0
         && match &p.kind {
@@ -40,6 +40,19 @@ fn active(p: &figcraft_color::Paint) -> bool {
             figcraft_color::PaintKind::Gradient(g) => g.stops.iter().any(|s| s.color.a > 0.0),
             _ => true,
         }
+}
+
+/// P and S have the same geometric clip C: resolve C * (S/C over P/C) once.
+pub(crate) fn composite_inner(p: &mut Pixmap, s: &Pixmap, cover: &Pixmap) {
+    for ((p, s), c) in p.data_mut().as_chunks_mut::<4>().0.iter_mut().zip(s.data().as_chunks::<4>().0).zip(cover.data().as_chunks::<4>().0) {
+        if c[3] == 0 {
+            continue;
+        }
+        let remaining = 1.0 - (f32::from(s[3]) / f32::from(c[3])).min(1.0);
+        for (p, s) in p.iter_mut().zip(s) {
+            *p = (f32::from(*s) + f32::from(*p) * remaining).round().clamp(0.0, 255.0) as u8;
+        }
+    }
 }
 
 /// Native controls distinguish opaque painted geometry from translucent paint pixels.

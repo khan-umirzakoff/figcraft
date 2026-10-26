@@ -36,7 +36,7 @@ exports at 528×272 at 2×, rather than Gaussian padding.
 | Fill inner, full/half | 3–6 | 2 |
 | Stroke inner, linear/radial/alignments | 128 | 1–2 |
 | Zero-opacity fill/stroke inner | 128 | 0 |
-| Fractional curved drop / inner | 43 / 50 | 17 / 27 |
+| Fractional curved drop / inner | 43 / 50 | 17 / 21 |
 | Curved body without effects | 19 | 19 (unchanged) |
 
 These are residual measurements, **not passing parity tolerances**. Full RGBA
@@ -59,8 +59,9 @@ layers already do, so SVG's different Gaussian primitive does not substitute
 for the renderer. The exported SVG effect is an image; the internal and
 `.figcraft` layers remain editable. Ordinary un-effected SVG shapes stay vectors.
 SVG tests compare embedded PNG bytes with the renderer, including spread,
-negative spread, groups and mixed fill/stroke ordering. PDF shares the shadow
-renderer already. Oversized/empty raster fallbacks remain unaccepted.
+negative spread, groups and mixed fill/stroke ordering. PDF shares the filter and drop-caster implementation, but retains a separate
+vector-content/inner-image composition path; equivalent inner clip/ordering
+is not established there. Oversized/empty raster fallbacks remain unaccepted.
 
 Generated regression tests distinguish a geometric caster from paint alpha,
 empty geometry from an inner-shadow body, an inner clip from a solid region,
@@ -72,7 +73,7 @@ hashes, whole imported models, baseline, rejected kernel-only result,
 geometry candidate, full residuals and verification logs). Native originals
 remain unchanged in the earlier reference archive; none is a shipped asset.
 
-## Verification on the candidate
+## Verification of geometry/body/knockout (`2b873d3`)
 
 Full `cargo +1.97.1 xtask ci` passed, including native tests, lint, layering,
 assets and WASM. All 58 intact carriers replay without warnings; their whole
@@ -89,3 +90,33 @@ across these checks. Dynamic fill/stroke opacity 0→.5 and undo/redo matched th
 original half-opacity model's render. Actual window captures were visually
 inspected. These workflow checks establish command/render consistency, not native
 visual equivalence, font parity, prototype fidelity or representative library QA.
+
+## Shared inner-edge coverage
+
+A follow-up against `2b873d3` removes double geometric coverage for one Normal
+paint without a backdrop. Painted pixels P and already-clipped inner shadow S
+share clip C, so their resolved composition is `S + P * (1 - S.alpha / C)`, with
+zero C skipped. Independent SourceOver of both clipped images incorrectly
+increases an opaque body's edge coverage. Multiple effects reuse the same clip;
+paint stacks, backdrops, mixed outlines and child composition retain their
+existing path until sample-correlated composition is established.
+
+A fractional rotated rounded-body test verifies that two inner shadows leave
+its opaque edge alpha unchanged; a partial translucent-colour test distinguishes
+shared clipping from independent SourceOver. The 58 whole imported models remain
+byte-identical. Of 50 native PNG comparisons, 49 outputs are unchanged; curved
+inner shadow alpha maximum improves 27→21 and alpha MAE .05594→.05300 /255.
+One maximum premultiplied blue residual increases 14→14.84 /255 while its mean
+absolute straight-blue error decreases .11076→.10857. All residuals are retained;
+this is not full-colour or native 1:1 acceptance. Shadow-free curved body alpha
+still differs by 19; group/mask and primitive AA cases are unchanged.
+
+Local follow-up evidence: gitignored `plan/figma/inner-coverage-20261026/`.
+
+The follow-up passed full `cargo +1.97.1 xtask ci` and was also run on the real Wayland desktop. Three relevant
+scenes per mode passed attached/headless MCP open/save/reopen, direct-render
+comparison, edit/undo/redo and failed-batch rollback. Actual inspector X and
+inner-shadow Blur fields were changed with raw mouse/keyboard input; both
+changed rendered pixels and keyboard Undo/Redo restored exact PNG bytes. The
+original values and editable curve scene were restored. Window captures were
+visually inspected. This checks those fields, not every inspector setting.

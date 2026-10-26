@@ -74,3 +74,29 @@ fn recorded_closed_region_knocks_out_a_stroke_drop_shadow() {
     d.get_mut(id).unwrap().effects[0].kind = EffectKind::DropShadow(Shadow { show_behind: true, ..s });
     assert_eq!(px(&render(&d, frame), 49, 80)[3], 255);
 }
+
+#[test]
+fn inner_shadow_and_paint_resolve_one_shared_clip() {
+    let mut paint = Pixmap::from_vec(vec![0, 0, 0, 0, 64, 0, 0, 64, 128, 0, 0, 128], tiny_skia::IntSize::from_wh(3, 1).unwrap()).unwrap();
+    let shadow = Pixmap::from_vec(vec![0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 64], tiny_skia::IntSize::from_wh(3, 1).unwrap()).unwrap();
+    let cover = Pixmap::from_vec(vec![0, 0, 0, 0, 128, 128, 128, 128, 255, 255, 255, 255], tiny_skia::IntSize::from_wh(3, 1).unwrap()).unwrap();
+    shadow::composite_inner(&mut paint, &shadow, &cover);
+    // Half-covered, half-red with half-black inside the shared clip: alpha .5 * .75.
+    assert_eq!(paint.data(), &[0, 0, 0, 0, 32, 0, 0, 96, 96, 0, 0, 160]);
+}
+
+#[test]
+fn inner_shadows_do_not_increase_an_opaque_curved_bodys_edge_coverage() {
+    let (mut d, frame, id) = scene(NodeKind::Rectangle, EffectKind::InnerShadow(shadow()));
+    let n = d.get_mut(id).unwrap();
+    n.corners.radii = [17.0; 4];
+    n.transform = figcraft_geom::Affine::translate((40.25, 40.125)) * figcraft_geom::Affine::rotate(0.17);
+    n.effects.push(Effect { kind: EffectKind::InnerShadow(shadow()), visible: true });
+    let shaded = render(&d, frame);
+    d.get_mut(id).unwrap().effects.clear();
+    let plain = render(&d, frame);
+    assert!(plain.data().as_chunks::<4>().0.iter().any(|p| p[3] > 0 && p[3] < 255));
+    for (a, b) in shaded.data().as_chunks::<4>().0.iter().zip(plain.data().as_chunks::<4>().0) {
+        assert_eq!(a[3], b[3], "inner shadows share the body's coverage");
+    }
+}

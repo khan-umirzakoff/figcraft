@@ -543,13 +543,17 @@ fn draw_layer(ctx: &Ctx, pix: &mut Pixmap, n: &Node, parent_xf: Affine, depth: u
     {
         // Single-outline leaves use the active body over its paint; mixed outlines/children keep
         // their existing fill/child/stroke ordering until native controls establish it.
-        let inner = |l: &mut Pixmap, sh: Option<&shadow::Outline>| {
+        let inner = |l: &mut Pixmap, sh: Option<&shadow::Outline>, cover: Option<&Pixmap>| {
             for e in n.effects.iter().filter(|e| e.visible) {
                 if let EffectKind::InnerShadow(s) = &e.kind
                     && let Some(sh) = sh
                     && let Some(inner) = shadow::inner_shadow(sh, lw, lh, lxf, ctx.scale, s)
                 {
-                    l.draw_pixmap(0, 0, inner.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+                    if let Some(cover) = cover {
+                        shadow::composite_inner(l, &inner, cover);
+                    } else {
+                        l.draw_pixmap(0, 0, inner.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+                    }
                 }
             }
         };
@@ -561,7 +565,7 @@ fn draw_layer(ctx: &Ctx, pix: &mut Pixmap, n: &Node, parent_xf: Affine, depth: u
             && n.children.is_empty()
             && !matches!(n.kind, NodeKind::Text(_))
             && geometry.as_ref().is_none_or(|g| g.len() == 1);
-        let over_fills = |l: &mut Pixmap| inner(l, shape.as_ref());
+        let over_fills = |l: &mut Pixmap| inner(l, shape.as_ref(), None);
         // Backdrops further down see this layer composited onto `pix` (over its backdrop, when
         // that is kept apart for now).
         let under = Under { opacity: op, blend: n.blend, ..Under::new(pix, (lx, ly), ctx.under) };
@@ -576,7 +580,11 @@ fn draw_layer(ctx: &Ctx, pix: &mut Pixmap, n: &Node, parent_xf: Affine, depth: u
             (has_inner && !deferred).then_some(&over_fills as &dyn Fn(&mut Pixmap)),
         );
         if deferred && let Some([outline]) = geometry.as_deref() {
-            inner(&mut layer, Some(outline));
+            // shortcut: one Normal paint shares the clip; paint stacks/backdrops need sample-correlated composition.
+            let mut paints = n.fills.iter().chain(&n.strokes).filter(|p| shadow::active(p));
+            let shared = back_shape.is_none() && paints.next().is_some_and(|p| p.blend == BlendMode::Normal) && paints.next().is_none();
+            let cover = shared.then(|| shadow::spread_alpha(std::slice::from_ref(outline), 0.0, lxf, lw, lh)).flatten();
+            inner(&mut layer, Some(outline), cover.as_ref());
         }
     }
     // A group is no outline of its own: its inner shadows are cast from around what its layers
